@@ -18,6 +18,7 @@ from kata.services.sessions import (
     SessionError,
     SessionNotFoundError,
     get_all_kata_sessions,
+    get_all_session_statuses,
     get_session_status,
     kill_session,
     launch_or_attach,
@@ -714,21 +715,24 @@ def switch(
         console.print("Use [bold]kata add[/bold] to add a project.")
         raise typer.Exit(0)
 
+    # Get all session statuses in one call (fast)
+    session_statuses = get_all_session_statuses()
+
     # Build fzf items with ANSI colors
     # Format: "● project-name (Group)" with colored status indicator
     items: list[str] = []
     name_map: dict[str, str] = {}  # Display string -> project name
 
     for project in sorted(projects, key=lambda p: (p.group, p.name)):
-        status = get_session_status(project.name)
+        status = session_statuses.get(project.name)
 
         # ANSI color codes for fzf
-        if status.value == "active":
+        if status and status.value == "active":
             indicator = "\033[32m●\033[0m"  # Green
-        elif status.value == "detached":
+        elif status and status.value == "detached":
             indicator = "\033[33m●\033[0m"  # Yellow
         else:
-            indicator = "\033[90m○\033[0m"  # Dim/gray
+            indicator = "\033[90m○\033[0m"  # Dim/gray (idle or no session)
 
         display = f"{indicator} {project.name} ({project.group})"
         items.append(display)

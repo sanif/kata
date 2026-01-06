@@ -86,6 +86,30 @@ def get_session_status(session_name: str) -> SessionStatus:
         return SessionStatus.IDLE
 
 
+def get_all_session_statuses() -> dict[str, SessionStatus]:
+    """Get status of all tmux sessions in one call.
+
+    Returns:
+        Dict mapping session name to SessionStatus
+    """
+    server = _get_tmux_server()
+    if server is None:
+        return {}
+
+    try:
+        statuses = {}
+        for session in server.sessions:
+            if session.name:
+                attached_count = session.session_attached
+                if attached_count and int(attached_count) > 0:
+                    statuses[session.name] = SessionStatus.ACTIVE
+                else:
+                    statuses[session.name] = SessionStatus.DETACHED
+        return statuses
+    except Exception:
+        return {}
+
+
 def is_inside_tmux() -> bool:
     """Check if we're running inside a tmux session.
 
