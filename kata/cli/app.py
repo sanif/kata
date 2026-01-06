@@ -680,23 +680,15 @@ def loop(
 
 
 @app.command()
-def switch(
-    preview: bool = typer.Option(
-        True,
-        "--preview/--no-preview",
-        "-p/-P",
-        help="Show project preview pane in fzf",
-    ),
-) -> None:
+def switch() -> None:
     """Interactively switch to a project using fzf.
 
-    Displays all registered projects with status indicators and allows fuzzy
-    searching. Select a project to launch or attach to its tmux session.
+    Displays project names for fast fuzzy selection. Select a project to
+    launch or attach to its tmux session.
 
     Requires fzf to be installed.
 
-    Tmux keybinding example (add to ~/.tmux.conf):
-        bind p display-popup -E -w 60% -h 60% "kata switch"
+    Keybinding: Ctrl+Space (auto-configured in Kata sessions)
     """
     from kata.utils.fzf import is_fzf_available, run_fzf_picker
 
@@ -715,31 +707,11 @@ def switch(
         console.print("Use [bold]kata add[/bold] to add a project.")
         raise typer.Exit(0)
 
-    # Get all session statuses in one call (fast)
-    session_statuses = get_all_session_statuses()
+    # Build simple project name list (fast - no tmux queries)
+    items = [p.name for p in sorted(projects, key=lambda p: (p.group, p.name))]
 
-    # Build fzf items with ANSI colors
-    # Format: "● project-name (Group)" with colored status indicator
-    items: list[str] = []
-    name_map: dict[str, str] = {}  # Display string -> project name
-
-    for project in sorted(projects, key=lambda p: (p.group, p.name)):
-        status = session_statuses.get(project.name)
-
-        # ANSI color codes for fzf
-        if status and status.value == "active":
-            indicator = "\033[32m●\033[0m"  # Green
-        elif status and status.value == "detached":
-            indicator = "\033[33m●\033[0m"  # Yellow
-        else:
-            indicator = "\033[90m○\033[0m"  # Dim/gray (idle or no session)
-
-        display = f"{indicator} {project.name} ({project.group})"
-        items.append(display)
-        name_map[display] = project.name
-
-    # Build preview command
-    preview_cmd = "kata switch-preview {2}" if preview else None
+    # No preview for speed
+    preview_cmd = None
 
     # Run fzf
     selected = run_fzf_picker(
@@ -752,19 +724,8 @@ def switch(
         # User cancelled
         raise typer.Exit(0)
 
-    # Extract project name from selection
-    # fzf may strip ANSI codes, so try direct lookup first, then parse
-    project_name = name_map.get(selected)
-    if not project_name:
-        # Try to extract name from selection: "● name (group)" or "○ name (group)"
-        import re
-        match = re.search(r"[●○]\s+(\S+)\s+\(", selected)
-        if match:
-            project_name = match.group(1)
-
-    if not project_name:
-        console.print(f"[red]Error:[/red] Could not parse selection: {selected}")
-        raise typer.Exit(1)
+    # Selected value is the project name directly
+    project_name = selected.strip()
 
     try:
         project = registry.get(project_name)
