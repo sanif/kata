@@ -114,7 +114,7 @@ class RecentsPanel(Widget):
         """Compose the widget."""
         yield Static(
             "[bold yellow]󰋚[/bold yellow] [dim]recents[/dim]  "
-            "[dim italic]Tab: switch · a: add · Enter: open[/dim]",
+            "[dim]Tab: switch · a: add · Enter: open[/dim]",
             id="recents-header",
         )
         yield OptionList(id="recents-list")
