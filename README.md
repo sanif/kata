@@ -121,6 +121,43 @@ Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
 export EDITOR=nvim  # or your preferred editor
 ```
 
+### Available Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/install.sh` | Full installation with dependency checks, tmux config, and setup |
+| `scripts/setup-tmux.sh` | Configure only tmux keybindings (for existing installations) |
+
+#### install.sh
+
+The main installation script that handles everything:
+
+```bash
+./scripts/install.sh
+```
+
+**What it does:**
+- Detects your OS (macOS/Linux)
+- Checks for required dependencies (python3, tmux, fzf, tmuxp)
+- Checks for optional dependencies (zoxide)
+- Offers to install missing dependencies via Homebrew (macOS)
+- Installs Kata in development mode
+- Configures tmux with Ctrl+Space keybinding
+- Optionally enables the return loop feature
+
+#### setup-tmux.sh
+
+Standalone script to configure tmux keybindings:
+
+```bash
+./scripts/setup-tmux.sh
+```
+
+**What it does:**
+- Adds `Ctrl+Space` keybinding for project switching
+- Creates a backup of your existing `~/.tmux.conf`
+- Skips if already configured
+
 ---
 
 ## Quick Start
