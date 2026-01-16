@@ -104,11 +104,23 @@ class SettingsScreen(ModalScreen[None]):
             super().__init__()
             self.settings = settings
 
+    # Theme display names
+    THEME_NAMES = {
+        "kata-dark": "Kata Dark",
+        "kata-light": "Kata Light",
+        "kata-ocean": "Kata Ocean",
+        "kata-warm": "Kata Warm",
+    }
+
     def __init__(self, *args, **kwargs) -> None:
         """Initialize settings screen."""
         super().__init__(*args, **kwargs)
         self._settings = get_settings()
         self._theme_changed = False
+
+    def _format_theme_name(self, theme_id: str) -> str:
+        """Format theme ID to display name."""
+        return self.THEME_NAMES.get(theme_id, theme_id.replace("-", " ").title())
 
     def compose(self) -> ComposeResult:
         """Compose the settings screen."""
@@ -160,15 +172,15 @@ class SettingsScreen(ModalScreen[None]):
             yield Static("Theme:", classes="setting-label")
             theme_options = [
                 Option(
-                    f"{'● ' if t == self._settings.theme else '  '}{t.title()}",
+                    f"{'● ' if t == self._settings.theme else '  '}{self._format_theme_name(t)}",
                     id=t,
                 )
                 for t in AVAILABLE_THEMES
             ]
             yield OptionList(*theme_options, id="theme-list")
             yield Static(
-                "Theme changes require restart",
-                classes="setting-description restart-notice",
+                "Select a theme for the interface",
+                classes="setting-description",
                 id="theme-notice",
             )
 
@@ -217,19 +229,22 @@ class SettingsScreen(ModalScreen[None]):
             self._settings = get_settings()
             self._theme_changed = True
 
+            # Apply theme immediately
+            self.app.theme = event.option.id
+
             # Update the list to show selection
             try:
                 theme_list = self.query_one("#theme-list", OptionList)
                 theme_list.clear_options()
                 for t in AVAILABLE_THEMES:
                     prefix = "● " if t == self._settings.theme else "  "
-                    theme_list.add_option(Option(f"{prefix}{t.title()}", id=t))
+                    theme_list.add_option(Option(f"{prefix}{self._format_theme_name(t)}", id=t))
             except Exception:
                 pass
 
             self.app.notify(
-                "Theme will be applied on next restart",
-                title="Theme Changed",
+                f"Theme: {self._format_theme_name(event.option.id)}",
+                title="Theme Applied",
             )
             self.post_message(self.SettingsChanged(self._settings))
 
