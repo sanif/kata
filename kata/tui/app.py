@@ -89,8 +89,9 @@ class KataDashboard(App):
 
     #recents-container {
         width: 100%;
-        height: 6;
+        height: 12;
         display: block;
+        border-top: solid $surface-lighten-1;
     }
 
     #recents-container.-hidden {
@@ -131,7 +132,9 @@ class KataDashboard(App):
         Binding("s", "settings", "Settings"),
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
-        Binding("tab", "switch_section", "Switch Section"),
+        Binding("tab", "switch_section", "Switch Section", show=False),
+        Binding("[", "focus_projects", "Projects"),
+        Binding("]", "focus_recents", "Recents"),
         Binding("1", "launch_shortcut_1", "1", show=False),
         Binding("2", "launch_shortcut_2", "2", show=False),
         Binding("3", "launch_shortcut_3", "3", show=False),
@@ -321,15 +324,27 @@ class KataDashboard(App):
         """Switch focus between projects tree and recents section."""
         try:
             if self._focus_on_recents:
-                # Switch to tree
-                tree = self.query_one(ProjectTree)
-                tree._focus_tree()
-                self._focus_on_recents = False
+                self.action_focus_projects()
             else:
-                # Switch to recents
-                recents = self.query_one(RecentsPanel)
-                recents.focus_list()
-                self._focus_on_recents = True
+                self.action_focus_recents()
+        except Exception:
+            pass
+
+    def action_focus_projects(self) -> None:
+        """Focus the projects tree."""
+        try:
+            tree = self.query_one(ProjectTree)
+            tree._focus_tree()
+            self._focus_on_recents = False
+        except Exception:
+            pass
+
+    def action_focus_recents(self) -> None:
+        """Focus the recents panel."""
+        try:
+            recents = self.query_one(RecentsPanel)
+            recents.focus_list()
+            self._focus_on_recents = True
         except Exception:
             pass
 
