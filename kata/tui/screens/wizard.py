@@ -32,7 +32,7 @@ class WizardStep(Vertical):
 
     WizardStep .step-title {
         text-style: bold;
-        color: $primary;
+        color: $text;
         margin-bottom: 1;
     }
 
@@ -53,7 +53,7 @@ class PathStep(WizardStep):
 
     PathStep #path-tree {
         height: 1fr;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
     }
 
     PathStep .path-hint {
@@ -114,7 +114,7 @@ class GroupStep(WizardStep):
     GroupStep #existing-groups {
         height: auto;
         max-height: 10;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
     }
 
     GroupStep .group-hint {
@@ -163,7 +163,7 @@ class TemplateStep(WizardStep):
     TemplateStep #template-list {
         height: auto;
         max-height: 12;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
     }
 
     TemplateStep .detected-type {
@@ -249,14 +249,14 @@ class LayoutStep(WizardStep):
     LayoutStep #layout-list {
         height: auto;
         max-height: 8;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
     }
 
     LayoutStep #layout-preview {
         margin-top: 1;
         padding: 1;
         background: $surface;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
         height: auto;
     }
 
@@ -388,7 +388,7 @@ class AddWizard(ModalScreen):
         min-height: 20;
         max-height: 30;
         background: $surface;
-        border: thick $primary;
+        border: solid $surface-lighten-1;
         padding: 1;
     }
 
@@ -399,7 +399,7 @@ class AddWizard(ModalScreen):
 
     AddWizard #wizard-title {
         text-style: bold;
-        color: $primary;
+        color: $text;
         text-align: center;
     }
 
@@ -453,6 +453,22 @@ class AddWizard(ModalScreen):
     current_step: reactive[int] = reactive(1)
     _path: Path | None = None
     _group: str = "Uncategorized"
+    _initial_path: str | None = None
+
+    def __init__(
+        self,
+        initial_path: str | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+    ) -> None:
+        """Initialize the wizard.
+
+        Args:
+            initial_path: Optional path to pre-fill (e.g., from zoxide entry)
+        """
+        super().__init__(name=name, id=id, classes=classes)
+        self._initial_path = initial_path
 
     def compose(self) -> ComposeResult:
         """Compose the wizard."""
@@ -476,6 +492,14 @@ class AddWizard(ModalScreen):
     def on_mount(self) -> None:
         """Set up initial state."""
         self._update_step_visibility()
+        # Pre-fill path if provided
+        if self._initial_path:
+            try:
+                path_step = self.query_one("#path-step", PathStep)
+                path_input = path_step.query_one("#path-input", Input)
+                path_input.value = self._initial_path
+            except Exception:
+                pass
 
     def watch_current_step(self, step: int) -> None:
         """React to step changes."""

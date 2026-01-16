@@ -57,11 +57,11 @@ class StatusIndicator(Widget):
     def _get_indicator(self) -> str:
         """Get the indicator character for current status."""
         indicators = {
-            SessionStatus.ACTIVE: "●",
-            SessionStatus.DETACHED: "●",
-            SessionStatus.IDLE: "○",
+            SessionStatus.ACTIVE: "◆",
+            SessionStatus.DETACHED: "◆",
+            SessionStatus.IDLE: "◇",
         }
-        return indicators.get(self.status, "○")
+        return indicators.get(self.status, "◇")
 
     def _get_class(self) -> str:
         """Get the CSS class for current status."""

@@ -131,6 +131,21 @@ class ContextMenuScreen(ModalScreen[str | None]):
     def on_mount(self) -> None:
         """Handle mount - execute preselected action if any."""
         if self.preselected_action:
+            # Highlight the preselected option in the list
+            action_to_index = {
+                MenuAction.KILL: 0,
+                MenuAction.DELETE: 1,
+                MenuAction.RENAME: 2,
+                MenuAction.MOVE_GROUP: 3,
+                MenuAction.OPEN_TERMINAL: 4,
+                MenuAction.SAVE_LAYOUT: 5,
+            }
+            index = action_to_index.get(self.preselected_action, 0)
+            try:
+                menu_list = self.query_one("#menu-list", OptionList)
+                menu_list.highlighted = index
+            except Exception:
+                pass
             # Execute the preselected action immediately
             self.set_timer(0.1, self._execute_preselected)
 
@@ -140,6 +155,14 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_kill_session()
         elif self.preselected_action == MenuAction.DELETE:
             self.action_delete_project()
+        elif self.preselected_action == MenuAction.RENAME:
+            self.action_rename_project()
+        elif self.preselected_action == MenuAction.MOVE_GROUP:
+            self.action_move_group()
+        elif self.preselected_action == MenuAction.OPEN_TERMINAL:
+            self.action_open_terminal()
+        elif self.preselected_action == MenuAction.SAVE_LAYOUT:
+            self.action_save_layout()
 
     @on(OptionList.OptionSelected)
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -475,13 +498,13 @@ class InputDialog(ModalScreen[str | None]):
         width: 60;
         height: auto;
         background: $surface;
-        border: thick $primary;
+        border: solid $surface-lighten-1;
         padding: 1 2;
     }
 
     InputDialog #dialog-title {
         text-style: bold;
-        color: $primary;
+        color: $text;
         margin-bottom: 1;
     }
 
@@ -573,13 +596,13 @@ class GroupSelectorDialog(ModalScreen[str | None]):
         height: auto;
         max-height: 20;
         background: $surface;
-        border: thick $primary;
+        border: solid $surface-lighten-1;
         padding: 1 2;
     }
 
     GroupSelectorDialog #dialog-title {
         text-style: bold;
-        color: $primary;
+        color: $text;
         margin-bottom: 1;
     }
 

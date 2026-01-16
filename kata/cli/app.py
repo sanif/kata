@@ -22,9 +22,11 @@ from kata.services.sessions import (
     get_session_status,
     kill_session,
     launch_or_attach,
+    launch_or_attach_adhoc,
     session_exists,
 )
 from kata.utils.detection import detect_project_type
+from kata.utils.zoxide import is_zoxide_available, query_zoxide
 from kata.utils.paths import PathValidationError, validate_project_path
 
 app = typer.Typer(
@@ -679,17 +681,161 @@ def loop(
         raise typer.Exit(1)
 
 
-@app.command()
-def switch() -> None:
-    """Interactively switch to a project using fzf.
+# ANSI color codes for switch command
+_CYAN = "\033[36m"
+_YELLOW = "\033[33m"
+_RESET = "\033[0m"
 
-    Displays project names for fast fuzzy selection. Select a project to
-    launch or attach to its tmux session.
 
-    Requires fzf to be installed.
+def _build_switch_items(
+    include_zoxide: bool = True,
+    zoxide_limit: int = 50,
+) -> list[str]:
+    """Build the list of items for the switch command.
 
-    Keybinding: Ctrl+Space (auto-configured in Kata sessions)
+    Returns items formatted with ANSI colors and icons:
+      - Cyan: registered Kata projects
+      - Yellow: directories from zoxide
     """
+    registry = get_registry()
+    projects = registry.list_all()
+
+    items: list[str] = []
+
+    # Add registered projects with icon (cyan)
+    for p in sorted(projects, key=lambda p: (p.group, p.name)):
+        items.append(f"{_CYAN}  {p.name}{_RESET}")
+
+    # Add zoxide entries if enabled and available
+    if include_zoxide and is_zoxide_available():
+        registered_paths = {p.path for p in projects}
+
+        zoxide_entries = query_zoxide(
+            limit=zoxide_limit,
+            exclude_paths=registered_paths,
+        )
+
+        for entry in zoxide_entries:
+            # Format: icon name  path (path at end for parsing)
+            items.append(f"{_YELLOW}  {entry.name}{_RESET}  {entry.path}")
+
+    return items
+
+
+def _parse_switch_selection(selection: str) -> tuple[str, str]:
+    """Parse a switch selection string to extract source type and value.
+
+    Args:
+        selection: The raw selection string from fzf (may have ANSI codes stripped)
+
+    Returns:
+        Tuple of (source_type, value) where:
+          - source_type is "registered" or "zoxide"
+          - value is the project name or directory path
+
+    Raises:
+        ValueError: If selection format is not recognized
+    """
+    import re
+
+    # Strip ANSI codes (fzf-tmux may strip them, regular fzf keeps them)
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    clean = ansi_escape.sub('', selection).strip()
+
+    # Zoxide entries have format: "  name  /path/to/dir"
+    # Registered projects have format: "  name"
+    # Check if there's a path (starts with /) after the name
+    if "  /" in clean:
+        # Zoxide entry: extract the path
+        parts = clean.split("  /", 1)
+        if len(parts) == 2:
+            return ("zoxide", "/" + parts[1].strip())
+
+    # Registered project: extract name (remove icon)
+    name = clean.lstrip(" ").lstrip("").strip()
+    return ("registered", name)
+
+
+def _handle_switch_selection(source_type: str, value: str) -> None:
+    """Handle a parsed switch selection by launching the appropriate session.
+
+    Args:
+        source_type: Either "registered" or "zoxide"
+        value: Project name (for registered) or path (for zoxide)
+    """
+    registry = get_registry()
+
+    if source_type == "registered":
+        project = registry.get(value)
+        project.record_open()
+        registry.update(project)
+        launch_or_attach(project)
+    else:
+        # Zoxide directory: use adhoc session
+        launch_or_attach_adhoc(value)
+
+
+@app.command()
+def switch(
+    zoxide: bool = typer.Option(
+        True,
+        "--zoxide/--no-zoxide",
+        help="Include directories from zoxide (default: enabled)",
+    ),
+    zoxide_limit: int = typer.Option(
+        50,
+        "--zoxide-limit",
+        help="Maximum number of zoxide entries to include",
+    ),
+    list_only: bool = typer.Option(
+        False,
+        "--list",
+        help="Output items to stdout (for piping to fzf-tmux)",
+    ),
+    select: Optional[str] = typer.Option(
+        None,
+        "--select",
+        help="Handle a selection from fzf-tmux (internal use)",
+    ),
+) -> None:
+    """Interactively switch to a project or directory using fzf.
+
+    Displays registered projects and frequently-visited directories from zoxide
+    for fast fuzzy selection. Select an item to launch or attach to its tmux session.
+
+    Items are shown with Nerd Font icons (requires a patched font):
+      - Cyan: Registered Kata projects
+      - Yellow: Directories from zoxide
+
+    Requires fzf to be installed. Zoxide integration is optional.
+    """
+    # Handle --select mode (from fzf-tmux keybinding)
+    if select is not None:
+        if not select:
+            # Empty selection = user cancelled
+            raise typer.Exit(0)
+        try:
+            source_type, value = _parse_switch_selection(select)
+            _handle_switch_selection(source_type, value)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
+        except ProjectNotFoundError:
+            console.print(f"[red]Error:[/red] Project not found")
+            raise typer.Exit(1)
+        except SessionError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
+        return
+
+    # Handle --list mode (output items for piping to fzf-tmux)
+    if list_only:
+        items = _build_switch_items(include_zoxide=zoxide, zoxide_limit=zoxide_limit)
+        for item in items:
+            print(item)
+        return
+
+    # Interactive mode: use fzf directly
     from kata.utils.fzf import is_fzf_available, run_fzf_picker
 
     if not is_fzf_available():
@@ -699,43 +845,30 @@ def switch() -> None:
         console.print("  Ubuntu: [bold]sudo apt install fzf[/bold]")
         raise typer.Exit(1)
 
-    registry = get_registry()
-    projects = registry.list_all()
+    items = _build_switch_items(include_zoxide=zoxide, zoxide_limit=zoxide_limit)
 
-    if not projects:
-        console.print("[dim]No projects registered.[/dim]")
+    if not items:
+        console.print("[dim]No projects registered and zoxide has no entries.[/dim]")
         console.print("Use [bold]kata add[/bold] to add a project.")
         raise typer.Exit(0)
 
-    # Build simple project name list (fast - no tmux queries)
-    items = [p.name for p in sorted(projects, key=lambda p: (p.group, p.name))]
-
-    # No preview for speed
-    preview_cmd = None
-
-    # Run fzf
     selected = run_fzf_picker(
         items=items,
-        preview_cmd=preview_cmd,
-        header="Select a project (Enter to switch, Esc to cancel)",
+        preview_cmd=None,
+        header="Select a project/directory (Enter to switch, Esc to cancel)",
     )
 
     if not selected:
-        # User cancelled
         raise typer.Exit(0)
 
-    # Selected value is the project name directly
-    project_name = selected.strip()
-
     try:
-        project = registry.get(project_name)
-        # Record that we opened this project
-        project.record_open()
-        registry.update(project)
-
-        launch_or_attach(project)
+        source_type, value = _parse_switch_selection(selected)
+        _handle_switch_selection(source_type, value)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
     except ProjectNotFoundError:
-        console.print(f"[red]Error:[/red] Project not found: {project_name}")
+        console.print(f"[red]Error:[/red] Project not found")
         raise typer.Exit(1)
     except SessionError as e:
         console.print(f"[red]Error:[/red] {e}")
