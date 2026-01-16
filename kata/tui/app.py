@@ -8,7 +8,7 @@ from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
 from kata.core.models import Project
-from kata.core.settings import get_settings
+from kata.core.settings import get_settings, reload_settings
 from kata.services.registry import get_registry
 from kata.services.sessions import kill_session, launch_or_attach, launch_or_attach_adhoc, session_exists
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
@@ -55,9 +55,9 @@ class KataDashboard(App):
         # Register all Kata themes
         for theme in KATA_THEMES:
             self.register_theme(theme)
-        # Set default theme based on settings
-        settings = get_settings()
-        theme_name = getattr(settings, "theme", "kata-dark")
+        # Reload settings fresh from disk to get current theme
+        settings = reload_settings()
+        theme_name = settings.theme
         if theme_name in [t.name for t in KATA_THEMES]:
             self.theme = theme_name
         else:
