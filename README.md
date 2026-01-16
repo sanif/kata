@@ -34,10 +34,13 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 | **Session Persistence** | Tmux sessions survive terminal crashes and reboots |
 | **Auto-Detection** | Automatically detects Python, Node.js, Go projects |
 | **Smart Templates** | Pre-configured layouts with editor, shell, and test windows |
+| **Layout Saving** | Capture your current tmux layout and save it to the config |
+| **Quick Launch** | Assign shortcuts (1-9) for instant project access |
+| **Zoxide Integration** | Access frequently visited directories from the recents panel |
 | **Morning Routine** | Launch multiple projects with one command |
 | **Git Integration** | See branch, dirty state, and upstream status at a glance |
 | **Return Loop** | Dashboard auto-relaunches after detaching from sessions |
-| **Beautiful TUI** | Interactive dashboard with search, preview, and theming |
+| **Beautiful TUI** | Interactive dashboard with search, preview, and custom themes |
 
 ---
 
@@ -49,15 +52,16 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 - **tmux** (terminal multiplexer)
 - **tmuxp** (tmux session manager)
 - **fzf** (fuzzy finder) - for project switching
-- **jq** (JSON processor) - for fast project listing
+- **zoxide** (optional) - for recents/frecency features
 
 ```bash
 # macOS
-brew install tmux fzf jq
+brew install tmux fzf zoxide
 pip install tmuxp
 
 # Ubuntu/Debian
-sudo apt install tmux fzf jq
+sudo apt install tmux fzf
+curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
 pip install tmuxp
 ```
 
@@ -318,6 +322,7 @@ Launch with `kata` (no arguments).
 | Key | Action |
 |-----|--------|
 | `Enter` | Launch selected project |
+| `1-9` | Quick launch project with that shortcut |
 | `a` | Add new project |
 | `e` | Edit project config |
 | `m` | Open context menu |
@@ -340,11 +345,13 @@ Press `/` to activate search. Type to fuzzy-filter projects by name or group. Pr
 ### Context Menu
 
 Press `m` on any project to access:
-- **Kill Session** - Terminate the tmux session
-- **Delete Project** - Remove from registry
-- **Rename Project** - Change the project name
-- **Move to Group** - Change group assignment
-- **Open Terminal** - Open directory in new terminal
+- **Kill Session** (`k`) - Terminate the tmux session
+- **Delete Project** (`d`) - Remove from registry
+- **Rename Project** (`r`) - Change the project name
+- **Move to Group** (`g`) - Change group assignment
+- **Open in Terminal** (`t`) - Open directory in new terminal
+- **Save Layout** (`l`) - Capture current tmux layout to config
+- **Set Shortcut** (`s`) - Assign a quick-launch number (1-9)
 
 ### Settings
 
@@ -366,6 +373,70 @@ When inside a Kata-managed tmux session:
 | `Ctrl+Space` | Open project switcher (fzf popup) |
 
 These keybindings are automatically configured when sessions are created.
+
+---
+
+## Layout Saving
+
+Kata can capture your current tmux session layout and save it to the project's config file. This is useful when you've customized your window arrangement and want to preserve it.
+
+### How to Save Layout
+
+1. Arrange your tmux windows and panes as desired
+2. Open the context menu (`m` in TUI)
+3. Select **Save Layout** (`l`)
+
+The current layout is captured including:
+- Window names and positions
+- Pane arrangements
+- Running commands (e.g., `nvim`, `npm run dev`)
+- Working directories
+
+The saved layout will be used next time you launch the project.
+
+---
+
+## Quick Launch Shortcuts
+
+Assign number shortcuts (1-9) to your most-used projects for instant access.
+
+### Setting a Shortcut
+
+1. Select a project in the TUI
+2. Open context menu (`m`)
+3. Choose **Set Shortcut** (`s`)
+4. Enter a number 1-9
+
+### Using Shortcuts
+
+Press the number key directly in the dashboard to instantly launch that project:
+- `1` - Launch project with shortcut 1
+- `2` - Launch project with shortcut 2
+- ... and so on up to `9`
+
+Projects with shortcuts show their number in the tree view.
+
+---
+
+## Zoxide Integration
+
+Kata integrates with [zoxide](https://github.com/ajeetdsouza/zoxide) to show your frequently visited directories in the **Recents** panel at the bottom of the dashboard.
+
+### Features
+
+- Directories are sorted by frecency (frequency + recency)
+- Quickly launch adhoc sessions for unregistered directories
+- Press `a` on a recent to add it as a registered project
+- Use `Tab` or `]` to focus the recents panel
+
+### Adhoc Sessions
+
+When you launch a directory from recents that isn't a registered project, Kata creates an **adhoc session** with:
+- Auto-detected project type
+- Standard layout (editor + shell + tests)
+- Temporary config (not persisted)
+
+To make it permanent, press `a` to add it as a registered project.
 
 ---
 
@@ -681,6 +752,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [tmuxp](https://github.com/tmux-python/tmuxp) - Tmux session manager
 - [Textual](https://github.com/Textualize/textual) - TUI framework
 - [fzf](https://github.com/junegunn/fzf) - Fuzzy finder
+- [zoxide](https://github.com/ajeetdsouza/zoxide) - Smarter cd command
 
 ---
 
