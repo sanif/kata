@@ -86,6 +86,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         self._projects: list[Project] = []
         self._zoxide_entries: list[ZoxideEntry] = []
         self._items: list[Project | ZoxideEntry] = []
+        self._index_map: dict[int, int] = {}  # option_index -> items_index
         self._statuses: dict[str, SessionStatus] = {}
 
     def compose(self) -> ComposeResult:
@@ -118,37 +119,71 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         option_list = self.query_one("#search-results", OptionList)
         option_list.clear_options()
         self._items.clear()
+        self._index_map.clear()
 
         query_lower = query.lower()
+        option_idx = 0
 
-        # Filter and add projects
-        for project in sorted(self._projects, key=lambda p: p.name):
-            if query and not self._fuzzy_match(query_lower, project.name.lower()):
-                continue
+        # Filter projects
+        filtered_projects = [
+            p for p in sorted(self._projects, key=lambda p: p.name)
+            if not query or self._fuzzy_match(query_lower, p.name.lower())
+        ]
 
-            status = self._statuses.get(project.name, SessionStatus.IDLE)
-            indicator = self._get_status_indicator(status)
-            project_type = detect_project_type(project.path)
-            type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+        # Filter zoxide entries
+        filtered_zoxide = [
+            e for e in self._zoxide_entries
+            if not query or self._fuzzy_match(query_lower, e.name.lower())
+        ]
 
-            label = f"{indicator} {type_icon} {project.name}  [dim]{project.group.lower()}[/dim]"
-            option_list.add_option(Option(label))
-            self._items.append(project)
+        # Add projects section
+        if filtered_projects:
+            option_list.add_option(Option("[bold cyan]󰉋 Projects[/bold cyan]", disabled=True))
+            option_idx += 1
 
-        # Filter and add zoxide entries
-        for entry in self._zoxide_entries:
-            if query and not self._fuzzy_match(query_lower, entry.name.lower()):
-                continue
+            for project in filtered_projects:
+                status = self._statuses.get(project.name, SessionStatus.IDLE)
+                indicator = self._get_status_indicator(status)
+                project_type = detect_project_type(project.path)
+                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
 
-            project_type = detect_project_type(entry.path)
-            type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                label = f"  {indicator} {type_icon} {project.name}  [dim]{project.group.lower()}[/dim]"
+                option_list.add_option(Option(label))
+                self._index_map[option_idx] = len(self._items)
+                self._items.append(project)
+                option_idx += 1
 
-            label = f"[dim]◇[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
-            option_list.add_option(Option(label))
-            self._items.append(entry)
+        # Add zoxide section
+        if filtered_zoxide:
+            if filtered_projects:
+                option_list.add_option(Option("[dim]─────────────────────────────────────────[/dim]", disabled=True))
+                option_idx += 1
+            option_list.add_option(Option("[bold yellow]󰋚 Recent (not registered)[/bold yellow]", disabled=True))
+            option_idx += 1
+
+            for entry in filtered_zoxide:
+                project_type = detect_project_type(entry.path)
+                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+
+                label = f"  [dim]◇[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
+                option_list.add_option(Option(label))
+                self._index_map[option_idx] = len(self._items)
+                self._items.append(entry)
+                option_idx += 1
 
         if not self._items:
             option_list.add_option(Option("[dim]No matches[/dim]", disabled=True))
+
+        # Pre-select first selectable item
+        self._select_first_item()
+
+    def _select_first_item(self) -> None:
+        """Pre-select the first selectable item."""
+        option_list = self.query_one("#search-results", OptionList)
+        # Find first selectable option (skip headers/separators)
+        for idx in sorted(self._index_map.keys()):
+            option_list.highlighted = idx
+            break
 
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
@@ -181,8 +216,9 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         """Select the highlighted item."""
         option_list = self.query_one("#search-results", OptionList)
         idx = option_list.highlighted
-        if idx is not None and 0 <= idx < len(self._items):
-            self.dismiss(self._items[idx])
+        if idx is not None and idx in self._index_map:
+            item_idx = self._index_map[idx]
+            self.dismiss(self._items[item_idx])
         else:
             self.dismiss(None)
 
@@ -193,8 +229,9 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle option selection via click or enter."""
         idx = event.option_index
-        if 0 <= idx < len(self._items):
-            self.dismiss(self._items[idx])
+        if idx in self._index_map:
+            item_idx = self._index_map[idx]
+            self.dismiss(self._items[item_idx])
 
     def on_key(self, event) -> None:
         """Handle key events for navigation."""
