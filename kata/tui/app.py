@@ -483,6 +483,11 @@ class KataDashboard(App):
             tree.filter_projects(event.query)
         except Exception:
             pass
+        try:
+            recents = self.query_one(RecentsPanel)
+            recents.filter_recents(event.query)
+        except Exception:
+            pass
 
     @on(SearchInput.SearchCancelled)
     def on_search_cancelled(self, event: SearchInput.SearchCancelled) -> None:
@@ -490,6 +495,11 @@ class KataDashboard(App):
         try:
             tree = self.query_one(ProjectTree)
             tree.refresh_projects()
+        except Exception:
+            pass
+        try:
+            recents = self.query_one(RecentsPanel)
+            recents.filter_recents("")
         except Exception:
             pass
 

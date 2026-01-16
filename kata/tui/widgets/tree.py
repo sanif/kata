@@ -14,7 +14,7 @@ from kata.services.registry import get_registry
 from kata.services.sessions import get_all_session_statuses, get_session_status
 from kata.utils.detection import detect_project_type
 from kata.utils.git import format_git_indicator_rich, get_git_status
-from kata.utils.zoxide import ZoxideEntry, is_zoxide_available, query_zoxide
+from kata.utils.zoxide import ZoxideEntry
 
 # Project type icons (Nerd Font)
 PROJECT_TYPE_ICONS = {
@@ -379,7 +379,7 @@ class ProjectTree(Widget):
         self._save_expanded_state()
 
     def filter_projects(self, query: str) -> None:
-        """Filter projects and zoxide entries by search query.
+        """Filter projects by search query.
 
         Args:
             query: Search query to filter by (fuzzy match on name)
@@ -407,7 +407,7 @@ class ProjectTree(Widget):
                     groups[group_name] = []
                 groups[group_name].append(project)
 
-        # Build filtered tree - registered projects
+        # Build filtered tree
         for group_name in sorted(groups.keys()):
             group_key = group_name.lower()
             group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
@@ -433,26 +433,6 @@ class ProjectTree(Widget):
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
-
-        # Filter and add matching zoxide entries
-        if is_zoxide_available():
-            registered_paths = {p.path for p in projects}
-            zoxide_entries = query_zoxide(limit=50, exclude_paths=registered_paths)
-
-            matching_zoxide = [
-                e for e in zoxide_entries
-                if self._fuzzy_match(query_lower, e.name.lower())
-            ]
-
-            if matching_zoxide:
-                group_label = "[dim]󰋚 recent[/dim]"
-                group_node = tree.root.add(group_label, expand=True)
-                group_node.data = {"type": "group", "name": "Recent"}
-
-                for entry in matching_zoxide:
-                    label = f"[dim]◇[/dim] [yellow]󰉋[/yellow] {entry.name}"
-                    zoxide_node = group_node.add_leaf(label)
-                    zoxide_node.data = {"type": "zoxide", "entry": entry}
 
         tree.root.expand()
 

@@ -87,6 +87,7 @@ class RecentsPanel(Widget):
         """Initialize the recents panel."""
         super().__init__(name=name, id=id, classes=classes)
         self._entries: list[ZoxideEntry] = []
+        self._all_entries: list[ZoxideEntry] = []
 
     def compose(self):
         """Compose the widget."""
@@ -102,6 +103,7 @@ class RecentsPanel(Widget):
         option_list = self.query_one("#recents-list", OptionList)
         option_list.clear_options()
         self._entries.clear()
+        self._all_entries.clear()
 
         if not is_zoxide_available():
             option_list.add_option(Option("[dim]zoxide not available[/dim]", disabled=True))
@@ -112,20 +114,59 @@ class RecentsPanel(Widget):
         registered_paths = {p.path for p in registry.list_all()}
 
         # Query zoxide entries
-        entries = query_zoxide(limit=20, exclude_paths=registered_paths)
+        entries = query_zoxide(limit=50, exclude_paths=registered_paths)
 
         if not entries:
             option_list.add_option(Option("[dim]No recent directories[/dim]", disabled=True))
             return
 
+        self._all_entries = entries
         self._entries = entries
+
+        self._render_entries(entries)
+
+    def _render_entries(self, entries: list[ZoxideEntry]) -> None:
+        """Render entries to the option list."""
+        option_list = self.query_one("#recents-list", OptionList)
+        option_list.clear_options()
+        self._entries = entries
+
+        if not entries:
+            option_list.add_option(Option("[dim]No matches[/dim]", disabled=True))
+            return
 
         for entry in entries:
             project_type = detect_project_type(entry.path)
             type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
-            # Format: icon name (dimmed path)
             label = f"[yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
             option_list.add_option(Option(label, id=entry.path))
+
+    def filter_recents(self, query: str) -> None:
+        """Filter recents by search query.
+
+        Args:
+            query: Search query to filter by (fuzzy match on name)
+        """
+        if not query:
+            self._render_entries(self._all_entries)
+            return
+
+        query_lower = query.lower()
+        filtered = [
+            e for e in self._all_entries
+            if self._fuzzy_match(query_lower, e.name.lower())
+        ]
+        self._render_entries(filtered)
+
+    def _fuzzy_match(self, query: str, target: str) -> bool:
+        """Check if query fuzzy matches target."""
+        if not query:
+            return True
+        query_idx = 0
+        for char in target:
+            if query_idx < len(query) and char == query[query_idx]:
+                query_idx += 1
+        return query_idx == len(query)
 
     def get_selected_entry(self) -> ZoxideEntry | None:
         """Get the currently selected zoxide entry."""
