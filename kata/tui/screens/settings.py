@@ -29,10 +29,11 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #settings-container {
         width: 60;
         height: auto;
-        max-height: 25;
+        max-height: 35;
         background: $surface;
         border: solid $surface-lighten-1;
         padding: 1 2;
+        overflow-y: auto;
     }
 
     SettingsScreen #settings-title {
@@ -67,9 +68,10 @@ class SettingsScreen(ModalScreen[None]):
 
     SettingsScreen #theme-list {
         height: auto;
-        max-height: 6;
-        margin-left: 20;
+        max-height: 8;
+        margin-left: 2;
         margin-bottom: 1;
+        background: $surface;
     }
 
     SettingsScreen #interval-input {
