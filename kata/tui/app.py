@@ -152,10 +152,10 @@ class KataDashboard(App):
         self._refresh_timer = self.set_interval(
             float(settings.refresh_interval), self._refresh_status
         )
-        # Update preview with first project after tree loads
+        # Trigger immediate status refresh on startup (before first project highlight)
+        self.set_timer(0.1, self._refresh_status)
+        # Update preview with first project after tree loads and status is updated
         self.set_timer(0.2, self._show_first_project)
-        # Trigger immediate status refresh on startup
-        self.set_timer(0.3, self._refresh_status)
 
     def _show_first_project(self) -> None:
         """Show the first project in the preview pane."""
