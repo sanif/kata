@@ -46,7 +46,24 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 
 ## Installation
 
-### Prerequisites
+### Quick Install (Recommended)
+
+```bash
+# Clone and run the install script
+git clone https://github.com/kata-workspace/kata.git
+cd kata
+./scripts/install.sh
+```
+
+The install script will:
+- Check and install prerequisites (tmux, fzf, tmuxp)
+- Install Kata
+- Configure tmux keybindings (Ctrl+Space for switching)
+- Optionally enable return loop
+
+### Manual Installation
+
+#### Prerequisites
 
 - **Python 3.10+**
 - **tmux** (terminal multiplexer)
@@ -65,7 +82,7 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 pip install tmuxp
 ```
 
-### Install Kata
+#### Install Kata
 
 ```bash
 # Clone the repository
@@ -73,32 +90,35 @@ git clone https://github.com/kata-workspace/kata.git
 cd kata
 
 # Install with uv (recommended)
-uv tool install -e .
+uv pip install -e .
 
 # Or with pip
 pip install -e .
 ```
 
-### Post-Installation Setup
+#### Configure Tmux
+
+Run the setup script to add Ctrl+Space keybinding:
 
 ```bash
-# Add to your shell profile (~/.zshrc or ~/.bashrc)
-export EDITOR=nvim  # or your preferred editor
+./scripts/setup-tmux.sh
+```
 
-# Create the fast switcher script
-mkdir -p ~/.local/bin
-cat > ~/.local/bin/kata-switch << 'EOF'
-#!/bin/bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
-export EDITOR=nvim
-R=~/.config/kata/registry.json
-[ -f "$R" ] || exit 0
-P=$(jq -r '.projects[].name' "$R" 2>/dev/null | sort)
-[ -z "$P" ] && exit 0
-S=$(echo "$P" | fzf --height=60% --reverse --header="Select project")
-[ -n "$S" ] && kata launch "$S"
-EOF
-chmod +x ~/.local/bin/kata-switch
+Or manually add to `~/.tmux.conf`:
+
+```bash
+# Kata workspace orchestrator
+bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"
+```
+
+Then reload: `tmux source ~/.tmux.conf`
+
+#### Shell Configuration
+
+Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+export EDITOR=nvim  # or your preferred editor
 ```
 
 ---
