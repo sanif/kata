@@ -208,6 +208,10 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         """Handle search input changes."""
         self._render_items(event.value)
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in search input."""
+        self.action_select()
+
     def action_cancel(self) -> None:
         """Cancel and dismiss the modal."""
         self.dismiss(None)
