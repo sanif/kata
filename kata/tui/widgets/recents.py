@@ -108,7 +108,7 @@ class RecentsPanel(Widget, can_focus=True):
         """Compose the widget."""
         yield Static(
             "[bold $primary]󰋚[/bold $primary] recents  "
-            "[dim]a: add · Enter: open · \\[: projects[/dim]",
+            "[dim][[: projects · a: add · Enter: open[/dim]",
             id="recents-header",
         )
         yield OptionList(id="recents-list")
