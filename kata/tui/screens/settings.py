@@ -31,13 +31,13 @@ class SettingsScreen(ModalScreen[None]):
         height: auto;
         max-height: 25;
         background: $surface;
-        border: thick $primary;
+        border: solid $surface-lighten-1;
         padding: 1 2;
     }
 
     SettingsScreen #settings-title {
         text-style: bold;
-        color: $primary;
+        color: $text;
         margin-bottom: 1;
         text-align: center;
     }

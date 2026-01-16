@@ -11,6 +11,7 @@ from kata.core.templates import get_template_path
 from kata.services.sessions import get_session_status
 from kata.utils.detection import detect_project_type
 from kata.utils.git import get_git_status
+from kata.utils.zoxide import ZoxideEntry
 from kata.tui.widgets.layout import parse_tmuxp_config, render_layout_summary
 
 
@@ -115,12 +116,12 @@ class PreviewPane(Widget):
 
         # Status styling
         status_styles = {
-            "active": ("green", "●", "running"),
-            "detached": ("yellow", "◐", "paused"),
-            "idle": ("dim", "○", "idle"),
+            "active": ("green", "◆", "running"),
+            "detached": ("yellow", "◆", "paused"),
+            "idle": ("dim", "◇", "idle"),
         }
         status_color, status_icon, status_text = status_styles.get(
-            status.value, ("dim", "○", "idle")
+            status.value, ("dim", "◇", "idle")
         )
 
         # Build header with icon
@@ -205,11 +206,11 @@ class PreviewPane(Widget):
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
         indicators = {
-            SessionStatus.ACTIVE: "[green]●[/green]",
-            SessionStatus.DETACHED: "[yellow]●[/yellow]",
-            SessionStatus.IDLE: "[dim]○[/dim]",
+            SessionStatus.ACTIVE: "[green]◆[/green]",
+            SessionStatus.DETACHED: "[yellow]◆[/yellow]",
+            SessionStatus.IDLE: "[dim]◇[/dim]",
         }
-        return indicators.get(status, "[dim]○[/dim]")
+        return indicators.get(status, "[dim]◇[/dim]")
 
     def _format_date(self, date_val: str | datetime | None) -> str:
         """Format a date string or datetime for display."""
@@ -256,3 +257,71 @@ class PreviewPane(Widget):
     def refresh_status(self) -> None:
         """Refresh the status display for current project."""
         self._update_content()
+
+    def update_zoxide(self, entry: ZoxideEntry) -> None:
+        """Update to show a zoxide entry.
+
+        Args:
+            entry: Zoxide entry to display
+        """
+        self.project = None  # Clear project
+        self.remove_class("-empty")
+
+        try:
+            content_widget = self.query_one("#preview-content", Static)
+        except Exception:
+            return
+
+        # Get project type for the directory
+        project_type = detect_project_type(entry.path)
+
+        # Get git status
+        git_status = get_git_status(entry.path)
+
+        # Project type icons
+        type_icons = {
+            "python": "󰌠",
+            "node": "󰎙",
+            "rust": "󱘗",
+            "go": "󰟓",
+            "ruby": "󰴭",
+            "generic": "󰉋",
+        }
+        type_icon = type_icons.get(project_type.value, "󰉋")
+
+        # Build content
+        content = f"""[bold][yellow]󰉋[/yellow] {entry.name}[/bold]
+
+[dim]◇ not registered[/dim]
+"""
+
+        # Info section
+        content += f"""
+[dim]├─[/dim] [dim]type[/dim]    {project_type.value}"""
+
+        # Add git info if available
+        if git_status.is_git_repo:
+            branch_display = git_status.branch or "unknown"
+            dirty = " [yellow]✱[/yellow]" if git_status.is_dirty else ""
+            sync_info = ""
+            if git_status.ahead > 0:
+                sync_info += f" [green]↑{git_status.ahead}[/green]"
+            if git_status.behind > 0:
+                sync_info += f" [red]↓{git_status.behind}[/red]"
+
+            content += f"\n[dim]├─[/dim] [dim]branch[/dim]  [cyan]{branch_display}[/cyan]{dirty}{sync_info}"
+
+        content += f"\n[dim]└─[/dim] [dim]path[/dim]    [dim]{entry.path}[/dim]"
+
+        # Zoxide score
+        content += f"""
+
+[dim]─────────────────────────────[/dim]
+
+  [dim]zoxide score[/dim]  {entry.score:.1f}
+
+[dim]─────────────────────────────[/dim]
+
+[dim]Press [/dim][bold]a[/bold][dim] to add as project[/dim]"""
+
+        content_widget.update(content)

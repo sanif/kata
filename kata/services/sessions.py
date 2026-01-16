@@ -29,13 +29,19 @@ class ConfigNotFoundError(SessionError):
 def _get_tmux_server() -> "libtmux.Server | None":
     """Get libtmux Server instance if tmux is running.
 
+    Note: libtmux may not work inside Textual TUI due to stdout/stderr
+    capture conflicts. Use direct subprocess calls for TUI status queries.
+
     Returns:
         Server instance or None if tmux not available
     """
     try:
         import libtmux
 
-        return libtmux.Server()
+        server = libtmux.Server()
+        # Try to access sessions to verify connection
+        _ = server.sessions
+        return server
     except Exception:
         return None
 
@@ -89,24 +95,39 @@ def get_session_status(session_name: str) -> SessionStatus:
 def get_all_session_statuses() -> dict[str, SessionStatus]:
     """Get status of all tmux sessions in one call.
 
+    Uses direct subprocess call to avoid conflicts with Textual's
+    stdout/stderr capture (libtmux doesn't work well inside TUI).
+
     Returns:
         Dict mapping session name to SessionStatus
     """
-    server = _get_tmux_server()
-    if server is None:
-        return {}
-
     try:
+        # Use direct tmux command instead of libtmux to avoid Textual conflicts
+        # Format: session_name|attached_count
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}|#{session_attached}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        if result.returncode != 0:
+            return {}
+
         statuses = {}
-        for session in server.sessions:
-            if session.name:
-                attached_count = session.session_attached
-                if attached_count and int(attached_count) > 0:
-                    statuses[session.name] = SessionStatus.ACTIVE
+        for line in result.stdout.strip().split("\n"):
+            if not line or "|" not in line:
+                continue
+            parts = line.split("|")
+            if len(parts) >= 2:
+                name = parts[0]
+                attached = parts[1]
+                if attached and int(attached) > 0:
+                    statuses[name] = SessionStatus.ACTIVE
                 else:
-                    statuses[session.name] = SessionStatus.DETACHED
+                    statuses[name] = SessionStatus.DETACHED
         return statuses
-    except Exception:
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
         return {}
 
 
@@ -251,6 +272,130 @@ def launch_or_attach(project: Project) -> None:
                 break
             time.sleep(0.1)
         attach_session(project.name)
+
+
+def _generate_unique_session_name(base_name: str) -> str:
+    """Generate a unique session name by appending a numeric suffix if needed.
+
+    Args:
+        base_name: The base session name (typically directory basename)
+
+    Returns:
+        A unique session name (base_name or base_name-N)
+    """
+    # Check if base name is available
+    if not session_exists(base_name):
+        return base_name
+
+    # Try with numeric suffixes
+    for i in range(1, 100):
+        candidate = f"{base_name}-{i}"
+        if not session_exists(candidate):
+            return candidate
+
+    # Fallback: use timestamp
+    import time
+
+    return f"{base_name}-{int(time.time())}"
+
+
+def launch_adhoc_session(directory: str, session_name: str | None = None) -> str:
+    """Launch a new tmux session for an unregistered directory.
+
+    Creates an adhoc session using a temporary tmuxp config with a layout
+    based on the detected project type.
+
+    Args:
+        directory: Path to the directory
+        session_name: Optional session name (defaults to directory basename)
+
+    Returns:
+        The session name that was created
+
+    Raises:
+        SessionError: If session creation fails
+    """
+    import tempfile
+
+    import yaml
+
+    from kata.core.templates import generate_adhoc_config
+    from kata.utils.detection import detect_project_type
+
+    # Resolve the directory path
+    directory_path = Path(directory).expanduser().resolve()
+    if not directory_path.is_dir():
+        raise SessionError(f"Directory not found: {directory}")
+
+    # Determine session name
+    base_name = session_name or directory_path.name
+    final_name = _generate_unique_session_name(base_name)
+
+    # Detect project type
+    project_type = detect_project_type(directory_path)
+
+    # Generate adhoc config
+    config = generate_adhoc_config(final_name, str(directory_path), project_type)
+
+    # Write to temporary file and launch
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".yaml",
+            prefix="kata-adhoc-",
+            delete=False,
+        ) as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            temp_path = f.name
+
+        try:
+            # Use tmuxp to load the session in detached mode
+            result = subprocess.run(
+                ["tmuxp", "load", "-d", temp_path],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                raise SessionError(f"Failed to launch adhoc session: {result.stderr}")
+
+            return final_name
+        finally:
+            # Clean up temporary config
+            Path(temp_path).unlink(missing_ok=True)
+
+    except FileNotFoundError:
+        raise SessionError("tmuxp not found. Please install tmuxp.")
+
+
+def launch_or_attach_adhoc(directory: str) -> None:
+    """Attach to an existing session for a directory, or create a new adhoc session.
+
+    Checks if a session with the directory's basename already exists. If so,
+    attaches to it. Otherwise, creates a new adhoc session and attaches.
+
+    Args:
+        directory: Path to the directory
+
+    Raises:
+        SessionError: If operation fails
+    """
+    import time
+
+    directory_path = Path(directory).expanduser().resolve()
+    base_name = directory_path.name
+
+    # Check if session already exists with this name
+    if session_exists(base_name):
+        attach_session(base_name)
+    else:
+        session_name = launch_adhoc_session(directory)
+        # Wait for session to be ready
+        for _ in range(10):
+            if session_exists(session_name):
+                break
+            time.sleep(0.1)
+        attach_session(session_name)
 
 
 def get_all_kata_sessions() -> list[str]:

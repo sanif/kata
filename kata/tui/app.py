@@ -10,13 +10,15 @@ from textual.widgets import Footer, Header, Static
 from kata.core.models import Project
 from kata.core.settings import get_settings
 from kata.services.registry import get_registry
-from kata.services.sessions import kill_session, launch_or_attach, session_exists
+from kata.services.sessions import kill_session, launch_or_attach, launch_or_attach_adhoc, session_exists
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
 from kata.tui.screens.settings import SettingsScreen
 from kata.tui.screens.wizard import AddWizard
 from kata.tui.widgets.preview import PreviewPane
+from kata.tui.widgets.recents import RecentsPanel
 from kata.tui.widgets.search import SearchInput
 from kata.tui.widgets.tree import ProjectTree
+from kata.utils.zoxide import ZoxideEntry
 
 
 class EmptyState(Static):
@@ -85,6 +87,16 @@ class KataDashboard(App):
         padding: 1 2;
     }
 
+    #recents-container {
+        width: 100%;
+        height: 8;
+        display: block;
+    }
+
+    #recents-container.-hidden {
+        display: none;
+    }
+
     Footer {
         height: 1;
         background: $background;
@@ -120,11 +132,14 @@ class KataDashboard(App):
         Binding("s", "settings", "Settings"),
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
+        Binding("tab", "switch_section", "Switch Section"),
     ]
 
     _project_to_launch: Project | None = None
+    _zoxide_to_launch: ZoxideEntry | None = None
     _refresh_timer: Timer | None = None
     _explicit_quit: bool = False
+    _focus_on_recents: bool = False
 
     def compose(self) -> ComposeResult:
         """Compose the dashboard."""
@@ -136,10 +151,13 @@ class KataDashboard(App):
         else:
             yield Container(
                 SearchInput(id="search"),
-                Horizontal(
-                    Container(ProjectTree(), id="tree-container"),
-                    Container(PreviewPane(), id="preview-container"),
-                    id="content-area",
+                Vertical(
+                    Horizontal(
+                        Container(ProjectTree(), id="tree-container"),
+                        Container(PreviewPane(), id="preview-container"),
+                        id="content-area",
+                    ),
+                    Container(RecentsPanel(), id="recents-container"),
                 ),
                 id="main-container",
             )
@@ -152,10 +170,15 @@ class KataDashboard(App):
         self._refresh_timer = self.set_interval(
             float(settings.refresh_interval), self._refresh_status
         )
-        # Trigger immediate status refresh on startup (before first project highlight)
-        self.set_timer(0.1, self._refresh_status)
+        # Trigger immediate status refresh on startup after first paint
+        self.call_after_refresh(self._initial_status_refresh)
         # Update preview with first project after tree loads and status is updated
-        self.set_timer(0.2, self._show_first_project)
+        self.set_timer(0.3, self._show_first_project)
+
+    def _initial_status_refresh(self) -> None:
+        """Refresh status after initial UI render."""
+        # Small delay to ensure tmux server is accessible
+        self.set_timer(0.05, self._refresh_status)
 
     def _show_first_project(self) -> None:
         """Show the first project in the preview pane."""
@@ -218,19 +241,33 @@ class KataDashboard(App):
             pass
 
     def action_launch(self) -> None:
-        """Launch the selected project."""
+        """Launch the selected project or zoxide entry."""
         try:
-            tree = self.query_one(ProjectTree)
-            project = tree.get_selected_project()
+            # If focused on recents, launch from there
+            if self._focus_on_recents:
+                recents = self.query_one(RecentsPanel)
+                entry = recents.get_selected_entry()
+                if entry:
+                    self._zoxide_to_launch = entry
+                    self.exit()
+                return
 
+            tree = self.query_one(ProjectTree)
+
+            # Check for project first
+            project = tree.get_selected_project()
             if project:
-                # Record open and exit to launch
                 project.record_open()
                 registry = get_registry()
                 registry.update(project)
-
-                # Store project to launch
                 self._project_to_launch = project
+                self.exit()
+                return
+
+            # Check for zoxide entry
+            zoxide_entry = tree.get_selected_zoxide()
+            if zoxide_entry:
+                self._zoxide_to_launch = zoxide_entry
                 self.exit()
         except Exception:
             pass
@@ -238,7 +275,7 @@ class KataDashboard(App):
     def action_help(self) -> None:
         """Show help."""
         self.notify(
-            "Enter: Launch | a: Add | e: Edit | m: Menu | s: Settings | /: Search | q: Quit",
+            "Enter: Launch | Tab: Switch | a: Add | e: Edit | m: Menu | /: Search | q: Quit",
             title="Keyboard Shortcuts",
         )
 
@@ -273,6 +310,22 @@ class KataDashboard(App):
     def _on_settings_closed(self, result: None) -> None:
         """Handle settings screen close."""
         pass
+
+    def action_switch_section(self) -> None:
+        """Switch focus between projects tree and recents section."""
+        try:
+            if self._focus_on_recents:
+                # Switch to tree
+                tree = self.query_one(ProjectTree)
+                tree._focus_tree()
+                self._focus_on_recents = False
+            else:
+                # Switch to recents
+                recents = self.query_one(RecentsPanel)
+                recents.focus_list()
+                self._focus_on_recents = True
+        except Exception:
+            pass
 
     @on(SettingsScreen.SettingsChanged)
     def on_settings_changed(self, event: SettingsScreen.SettingsChanged) -> None:
@@ -319,8 +372,26 @@ class KataDashboard(App):
             pass
 
     def action_add_project(self) -> None:
-        """Open the Add Project wizard."""
-        self.push_screen(AddWizard(), self._on_wizard_complete)
+        """Open the Add Project wizard (pre-filled with zoxide path if selected)."""
+        try:
+            # Check recents panel first if focused there
+            if self._focus_on_recents:
+                recents = self.query_one(RecentsPanel)
+                entry = recents.get_selected_entry()
+                if entry:
+                    self.push_screen(AddWizard(initial_path=entry.path), self._on_wizard_complete)
+                    return
+
+            # Check tree for zoxide entry
+            tree = self.query_one(ProjectTree)
+            zoxide_entry = tree.get_selected_zoxide()
+
+            if zoxide_entry:
+                self.push_screen(AddWizard(initial_path=zoxide_entry.path), self._on_wizard_complete)
+            else:
+                self.push_screen(AddWizard(), self._on_wizard_complete)
+        except Exception:
+            self.push_screen(AddWizard(), self._on_wizard_complete)
 
     def _on_wizard_complete(self, result: Project | None) -> None:
         """Handle wizard completion."""
@@ -385,6 +456,18 @@ class KataDashboard(App):
         self._project_to_launch = project
         self.exit()
 
+    @on(ProjectTree.ZoxideSelected)
+    def on_zoxide_selected(self, event: ProjectTree.ZoxideSelected) -> None:
+        """Handle zoxide entry selection from tree."""
+        self._zoxide_to_launch = event.entry
+        self.exit()
+
+    @on(RecentsPanel.RecentSelected)
+    def on_recent_selected(self, event: RecentsPanel.RecentSelected) -> None:
+        """Handle recent entry selection from recents panel."""
+        self._zoxide_to_launch = event.entry
+        self.exit()
+
     def on_project_tree_project_highlighted(
         self, event: ProjectTree.ProjectHighlighted
     ) -> None:
@@ -416,10 +499,17 @@ def run_dashboard() -> None:
     app = KataDashboard()
     app.run()
 
-    # After the app exits, launch the selected project if any
+    # After the app exits, launch the selected project or zoxide entry
     project = app._project_to_launch
+    zoxide_entry = app._zoxide_to_launch
+
     if project:
         try:
             launch_or_attach(project)
+        except Exception as e:
+            print(f"Error launching session: {e}")
+    elif zoxide_entry:
+        try:
+            launch_or_attach_adhoc(zoxide_entry.path)
         except Exception as e:
             print(f"Error launching session: {e}")

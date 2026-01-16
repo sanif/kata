@@ -28,8 +28,6 @@ def _base_template(name: str, path: str) -> dict[str, Any]:
         "after": [
             # Ctrl+Q: detach and return to Kata TUI dashboard
             "tmux bind-key -n C-q detach-client",
-            # Ctrl+Space: fast project switcher popup (uses kata-switch script)
-            "tmux bind-key -n C-Space display-popup -E -w 60% -h 60% 'kata-switch'",
         ],
         "windows": [],
     }
@@ -348,3 +346,26 @@ def template_exists(project: Project) -> bool:
         True if template exists
     """
     return get_template_path(project).exists()
+
+
+def generate_adhoc_config(
+    session_name: str,
+    directory: str,
+    project_type: ProjectType,
+) -> dict[str, Any]:
+    """Generate an in-memory tmuxp config for an adhoc session.
+
+    Creates a temporary config for directories that aren't registered projects.
+    Uses the standard layout based on the detected project type.
+
+    Args:
+        session_name: Name for the tmux session
+        directory: Path to the directory
+        project_type: Detected project type for the directory
+
+    Returns:
+        tmuxp-compatible config dictionary
+    """
+    template = _base_template(session_name, directory)
+    template["windows"] = _standard_windows(project_type)
+    return template
