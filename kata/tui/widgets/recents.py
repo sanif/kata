@@ -107,7 +107,7 @@ class RecentsPanel(Widget, can_focus=True):
     def compose(self):
         """Compose the widget."""
         yield Static(
-            "[bold $primary]󰋚[/bold $primary] [dim]recents[/dim]",
+            "[bold $primary]󰋚[/bold $primary] [dim]Recent folders[/dim]",
             id="recents-header",
         )
         yield OptionList(id="recents-list")
