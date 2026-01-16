@@ -513,6 +513,11 @@ class KataDashboard(App):
         self._zoxide_to_launch = event.entry
         self.exit()
 
+    @on(RecentsPanel.AddRequested)
+    def on_add_requested(self, event: RecentsPanel.AddRequested) -> None:
+        """Handle add request from recents panel."""
+        self.push_screen(AddWizard(initial_path=event.entry.path), self._on_wizard_complete)
+
     def on_project_tree_project_highlighted(
         self, event: ProjectTree.ProjectHighlighted
     ) -> None:
