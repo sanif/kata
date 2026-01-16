@@ -96,14 +96,6 @@ class KataDashboard(App):
         border-right: vkey $surface-lighten-1;
     }
 
-    #tree-header {
-        width: 100%;
-        height: 1;
-        padding: 0 1;
-        background: $surface-darken-1;
-        color: $text-muted;
-    }
-
     #preview-container {
         width: 1fr;
         height: 100%;
@@ -186,15 +178,7 @@ class KataDashboard(App):
             yield Container(
                 Vertical(
                     Horizontal(
-                        Container(
-                            Static(
-                                "[bold $primary]󰉋[/bold $primary] projects  "
-                                "[dim]]: recents · m: menu[/dim]",
-                                id="tree-header",
-                            ),
-                            ProjectTree(),
-                            id="tree-container",
-                        ),
+                        Container(ProjectTree(), id="tree-container"),
                         Container(PreviewPane(), id="preview-container"),
                         id="content-area",
                     ),
