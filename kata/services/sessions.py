@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from kata.core.config import CONFIGS_DIR
+from kata.core.config import get_project_config_path, migrate_project_config
 from kata.core.models import Project, SessionStatus
 
 
@@ -152,7 +152,10 @@ def launch_session(project: Project) -> None:
         ConfigNotFoundError: If the config file doesn't exist
         SessionError: If session creation fails
     """
-    config_path = CONFIGS_DIR / project.config
+    # Auto-migrate from legacy location if needed
+    migrate_project_config(project.name, project.path)
+
+    config_path = get_project_config_path(project.path)
 
     if not config_path.exists():
         raise ConfigNotFoundError(f"Config file not found: {config_path}")
@@ -642,7 +645,6 @@ def save_current_session_layout(project: Project) -> Path:
     """
     import yaml
 
-    from kata.core.config import ensure_config_dirs
     from kata.core.templates import _base_template
 
     if not session_exists(project.name):
@@ -659,9 +661,8 @@ def save_current_session_layout(project: Project) -> Path:
     if layout["start_directory"]:
         base["start_directory"] = layout["start_directory"]
 
-    # Write to config file
-    ensure_config_dirs()
-    config_path = CONFIGS_DIR / project.config
+    # Write to config file in project directory
+    config_path = get_project_config_path(project.path)
 
     try:
         with open(config_path, "w", encoding="utf-8") as f:

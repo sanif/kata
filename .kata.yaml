@@ -1,0 +1,22 @@
+session_name: cli-pm
+start_directory: /Volumes/External/Users/sanifss/Desktop/Workspace/Projects/Personal/cli-pm
+after:
+- tmux bind-key -n C-q detach-client
+- tmux bind-key -n C-Space display-popup -E -w 60% -h 60% 'kata-switch'
+windows:
+- window_name: editor
+  panes:
+  - shell_command:
+    - nvim
+  layout: 55e2,230x40,0,0,32
+- window_name: Claude
+  panes:
+  - shell_command:
+    - claude
+  layout: 66e3,230x39,0,0,33
+- window_name: Shell
+  panes:
+  - shell_command: []
+  - shell_command: []
+  - shell_command: []
+  layout: 34c4,230x40,0,0[230x20,0,0,34,230x9,0,21,35,230x9,0,31,36]
