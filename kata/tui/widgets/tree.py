@@ -164,10 +164,13 @@ class ProjectTree(Widget):
                 git_status = get_git_status(project.path)
                 git_indicator = format_git_indicator_rich(git_status)
 
+                # Shortcut prefix if assigned
+                shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
+
                 if git_indicator:
-                    label = f"{indicator} {type_icon} {project.name} [dim]{git_indicator}[/dim]"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
                 else:
-                    label = f"{indicator} {type_icon} {project.name}"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -285,10 +288,13 @@ class ProjectTree(Widget):
                 git_status = get_git_status(project.path)
                 git_indicator = format_git_indicator_rich(git_status)
 
+                # Shortcut prefix if assigned
+                shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
+
                 if git_indicator:
-                    label = f"{indicator} {type_icon} {project.name} [dim]{git_indicator}[/dim]"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
                 else:
-                    label = f"{indicator} {type_icon} {project.name}"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -426,10 +432,13 @@ class ProjectTree(Widget):
                 git_status = get_git_status(project.path)
                 git_indicator = format_git_indicator_rich(git_status)
 
+                # Shortcut prefix if assigned
+                shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
+
                 if git_indicator:
-                    label = f"{indicator} {type_icon} {project.name} [dim]{git_indicator}[/dim]"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
                 else:
-                    label = f"{indicator} {type_icon} {project.name}"
+                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}

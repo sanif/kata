@@ -132,6 +132,15 @@ class KataDashboard(App):
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
         Binding("tab", "switch_section", "Switch Section"),
+        Binding("1", "launch_shortcut_1", "1", show=False),
+        Binding("2", "launch_shortcut_2", "2", show=False),
+        Binding("3", "launch_shortcut_3", "3", show=False),
+        Binding("4", "launch_shortcut_4", "4", show=False),
+        Binding("5", "launch_shortcut_5", "5", show=False),
+        Binding("6", "launch_shortcut_6", "6", show=False),
+        Binding("7", "launch_shortcut_7", "7", show=False),
+        Binding("8", "launch_shortcut_8", "8", show=False),
+        Binding("9", "launch_shortcut_9", "9", show=False),
     ]
 
     _project_to_launch: Project | None = None
@@ -292,7 +301,7 @@ class KataDashboard(App):
 
     def _on_context_menu_result(self, result: str | None) -> None:
         """Handle context menu result."""
-        if result in ("deleted", "renamed", "moved"):
+        if result in ("deleted", "renamed", "moved", "shortcut_changed"):
             # Refresh the tree after modifications
             try:
                 tree = self.query_one(ProjectTree)
@@ -323,6 +332,45 @@ class KataDashboard(App):
                 self._focus_on_recents = True
         except Exception:
             pass
+
+    def _launch_by_shortcut(self, shortcut: int) -> None:
+        """Launch project by shortcut number."""
+        registry = get_registry()
+        for project in registry.list_all():
+            if project.shortcut == shortcut:
+                project.record_open()
+                registry.update(project)
+                self._project_to_launch = project
+                self.exit()
+                return
+        self.notify(f"No project with shortcut {shortcut}", severity="warning")
+
+    def action_launch_shortcut_1(self) -> None:
+        self._launch_by_shortcut(1)
+
+    def action_launch_shortcut_2(self) -> None:
+        self._launch_by_shortcut(2)
+
+    def action_launch_shortcut_3(self) -> None:
+        self._launch_by_shortcut(3)
+
+    def action_launch_shortcut_4(self) -> None:
+        self._launch_by_shortcut(4)
+
+    def action_launch_shortcut_5(self) -> None:
+        self._launch_by_shortcut(5)
+
+    def action_launch_shortcut_6(self) -> None:
+        self._launch_by_shortcut(6)
+
+    def action_launch_shortcut_7(self) -> None:
+        self._launch_by_shortcut(7)
+
+    def action_launch_shortcut_8(self) -> None:
+        self._launch_by_shortcut(8)
+
+    def action_launch_shortcut_9(self) -> None:
+        self._launch_by_shortcut(9)
 
     @on(SettingsScreen.SettingsChanged)
     def on_settings_changed(self, event: SettingsScreen.SettingsChanged) -> None:

@@ -35,6 +35,7 @@ class MenuAction(Enum):
     MOVE_GROUP = auto()
     OPEN_TERMINAL = auto()
     SAVE_LAYOUT = auto()
+    SET_SHORTCUT = auto()
 
 
 class ContextMenuScreen(ModalScreen[str | None]):
@@ -90,6 +91,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("g", "move_group", "Move to Group", show=False),
         Binding("t", "open_terminal", "Open Terminal", show=False),
         Binding("l", "save_layout", "Save Layout", show=False),
+        Binding("s", "set_shortcut", "Set Shortcut", show=False),
     ]
 
     # Allow pre-selecting an action when opening
@@ -118,6 +120,11 @@ class ContextMenuScreen(ModalScreen[str | None]):
             yield Static("Project Actions", id="menu-title")
             yield Static(f"[dim]{self.project.name}[/dim]", id="menu-subtitle")
 
+            # Show current shortcut if set
+            shortcut_label = "[s] Set Shortcut"
+            if self.project.shortcut:
+                shortcut_label = f"[s] Set Shortcut [dim](current: {self.project.shortcut})[/dim]"
+
             options = [
                 Option("[k] Kill Session", id="kill"),
                 Option("[d] Delete Project", id="delete"),
@@ -125,6 +132,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 Option("[g] Move to Group", id="move_group"),
                 Option("[t] Open in Terminal", id="open_terminal"),
                 Option("[l] Save Layout", id="save_layout"),
+                Option(shortcut_label, id="set_shortcut"),
             ]
             yield OptionList(*options, id="menu-list")
 
@@ -139,6 +147,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 MenuAction.MOVE_GROUP: 3,
                 MenuAction.OPEN_TERMINAL: 4,
                 MenuAction.SAVE_LAYOUT: 5,
+                MenuAction.SET_SHORTCUT: 6,
             }
             index = action_to_index.get(self.preselected_action, 0)
             try:
@@ -163,6 +172,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_open_terminal()
         elif self.preselected_action == MenuAction.SAVE_LAYOUT:
             self.action_save_layout()
+        elif self.preselected_action == MenuAction.SET_SHORTCUT:
+            self.action_set_shortcut()
 
     @on(OptionList.OptionSelected)
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -180,6 +191,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_open_terminal()
         elif option_id == "save_layout":
             self.action_save_layout()
+        elif option_id == "set_shortcut":
+            self.action_set_shortcut()
 
     def action_cancel(self) -> None:
         """Cancel and close the menu."""
@@ -401,6 +414,50 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.dismiss("layout_saved")
         except SessionError as e:
             self.app.notify(f"Failed to save layout: {e}", severity="error")
+            self.dismiss(None)
+
+    def action_set_shortcut(self) -> None:
+        """Set a quick launch shortcut (1-9) for this project."""
+        self.app.push_screen(
+            ShortcutSelectorDialog(
+                current_shortcut=self.project.shortcut,
+                project_name=self.project.name,
+            ),
+            self._on_shortcut_selected,
+        )
+
+    def _on_shortcut_selected(self, shortcut: int | None) -> None:
+        """Handle shortcut selection."""
+        # None means cancelled, -1 means clear shortcut
+        if shortcut is None:
+            return
+
+        try:
+            registry = get_registry()
+
+            # If clearing shortcut
+            if shortcut == -1:
+                self.project.shortcut = None
+                registry.update(self.project)
+                self.app.notify("Shortcut cleared", title="Success")
+                self.dismiss("shortcut_changed")
+                return
+
+            # Check if shortcut is already used by another project
+            for project in registry.list_all():
+                if project.shortcut == shortcut and project.name != self.project.name:
+                    self.app.notify(
+                        f"Shortcut {shortcut} already used by '{project.name}'",
+                        severity="error",
+                    )
+                    return
+
+            self.project.shortcut = shortcut
+            registry.update(self.project)
+            self.app.notify(f"Shortcut set to: {shortcut}", title="Success")
+            self.dismiss("shortcut_changed")
+        except Exception as e:
+            self.app.notify(f"Failed to set shortcut: {e}", severity="error")
             self.dismiss(None)
 
 
@@ -686,3 +743,139 @@ class GroupSelectorDialog(ModalScreen[str | None]):
     def action_cancel(self) -> None:
         """Handle escape key."""
         self.dismiss(None)
+
+
+class ShortcutSelectorDialog(ModalScreen[int | None]):
+    """Dialog for selecting a shortcut number (1-9)."""
+
+    CSS = """
+    ShortcutSelectorDialog {
+        align: center middle;
+    }
+
+    ShortcutSelectorDialog #dialog-container {
+        width: 40;
+        height: auto;
+        background: $surface;
+        border: solid $surface-lighten-1;
+        padding: 1 2;
+    }
+
+    ShortcutSelectorDialog #dialog-title {
+        text-style: bold;
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    ShortcutSelectorDialog #dialog-subtitle {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    ShortcutSelectorDialog #shortcut-list {
+        height: auto;
+        max-height: 12;
+        background: $surface;
+    }
+
+    ShortcutSelectorDialog #shortcut-list > .option-list--option-highlighted {
+        background: $surface-lighten-1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("1", "select_1", "1", show=False),
+        Binding("2", "select_2", "2", show=False),
+        Binding("3", "select_3", "3", show=False),
+        Binding("4", "select_4", "4", show=False),
+        Binding("5", "select_5", "5", show=False),
+        Binding("6", "select_6", "6", show=False),
+        Binding("7", "select_7", "7", show=False),
+        Binding("8", "select_8", "8", show=False),
+        Binding("9", "select_9", "9", show=False),
+        Binding("0", "clear_shortcut", "Clear", show=False),
+    ]
+
+    def __init__(
+        self,
+        current_shortcut: int | None,
+        project_name: str,
+        *args,
+        **kwargs,
+    ) -> None:
+        """Initialize shortcut selector."""
+        super().__init__(*args, **kwargs)
+        self.current_shortcut = current_shortcut
+        self.project_name = project_name
+
+    def compose(self) -> ComposeResult:
+        """Compose the dialog."""
+        with Container(id="dialog-container"):
+            yield Static("Set Shortcut", id="dialog-title")
+            yield Static(f"[dim]Press 1-9 or select below[/dim]", id="dialog-subtitle")
+
+            options = []
+            for i in range(1, 10):
+                marker = "● " if i == self.current_shortcut else "  "
+                options.append(Option(f"{marker}[{i}]", id=str(i)))
+
+            # Add clear option
+            options.append(Option("  [0] Clear shortcut", id="clear"))
+
+            yield OptionList(*options, id="shortcut-list")
+
+    def on_mount(self) -> None:
+        """Highlight current shortcut."""
+        if self.current_shortcut:
+            try:
+                option_list = self.query_one("#shortcut-list", OptionList)
+                option_list.highlighted = self.current_shortcut - 1
+            except Exception:
+                pass
+
+    @on(OptionList.OptionSelected)
+    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle option selection."""
+        if event.option.id == "clear":
+            self.dismiss(-1)
+        else:
+            try:
+                self.dismiss(int(event.option.id))
+            except ValueError:
+                self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Handle escape key."""
+        self.dismiss(None)
+
+    def action_clear_shortcut(self) -> None:
+        """Clear shortcut (0 key)."""
+        self.dismiss(-1)
+
+    def action_select_1(self) -> None:
+        self.dismiss(1)
+
+    def action_select_2(self) -> None:
+        self.dismiss(2)
+
+    def action_select_3(self) -> None:
+        self.dismiss(3)
+
+    def action_select_4(self) -> None:
+        self.dismiss(4)
+
+    def action_select_5(self) -> None:
+        self.dismiss(5)
+
+    def action_select_6(self) -> None:
+        self.dismiss(6)
+
+    def action_select_7(self) -> None:
+        self.dismiss(7)
+
+    def action_select_8(self) -> None:
+        self.dismiss(8)
+
+    def action_select_9(self) -> None:
+        self.dismiss(9)
