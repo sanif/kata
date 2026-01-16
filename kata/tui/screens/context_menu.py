@@ -121,17 +121,17 @@ class ContextMenuScreen(ModalScreen[str | None]):
             yield Static(f"[dim]{self.project.name}[/dim]", id="menu-subtitle")
 
             # Show current shortcut if set
-            shortcut_label = "[s] Set Shortcut"
+            shortcut_label = "[[s]] Set Shortcut"
             if self.project.shortcut:
-                shortcut_label = f"[s] Set Shortcut [dim](current: {self.project.shortcut})[/dim]"
+                shortcut_label = f"[[s]] Set Shortcut [dim](current: {self.project.shortcut})[/dim]"
 
             options = [
-                Option("[k] Kill Session", id="kill"),
-                Option("[d] Delete Project", id="delete"),
-                Option("[r] Rename Project", id="rename"),
-                Option("[g] Move to Group", id="move_group"),
-                Option("[t] Open in Terminal", id="open_terminal"),
-                Option("[l] Save Layout", id="save_layout"),
+                Option("[[k]] Kill Session", id="kill"),
+                Option("[[d]] Delete Project", id="delete"),
+                Option("[[r]] Rename Project", id="rename"),
+                Option("[[g]] Move to Group", id="move_group"),
+                Option("[[t]] Open in Terminal", id="open_terminal"),
+                Option("[[l]] Save Layout", id="save_layout"),
                 Option(shortcut_label, id="set_shortcut"),
             ]
             yield OptionList(*options, id="menu-list")
@@ -818,10 +818,10 @@ class ShortcutSelectorDialog(ModalScreen[int | None]):
             options = []
             for i in range(1, 10):
                 marker = "● " if i == self.current_shortcut else "  "
-                options.append(Option(f"{marker}[{i}]", id=str(i)))
+                options.append(Option(f"{marker}[[{i}]]", id=str(i)))
 
             # Add clear option
-            options.append(Option("  [0] Clear shortcut", id="clear"))
+            options.append(Option("  [[0]] Clear shortcut", id="clear"))
 
             yield OptionList(*options, id="shortcut-list")
 
