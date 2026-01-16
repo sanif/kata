@@ -154,6 +154,8 @@ class KataDashboard(App):
         )
         # Update preview with first project after tree loads
         self.set_timer(0.2, self._show_first_project)
+        # Trigger immediate status refresh on startup
+        self.set_timer(0.3, self._refresh_status)
 
     def _show_first_project(self) -> None:
         """Show the first project in the preview pane."""
