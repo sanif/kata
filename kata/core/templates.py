@@ -25,10 +25,6 @@ def _base_template(name: str, path: str) -> dict[str, Any]:
     return {
         "session_name": name,
         "start_directory": path,
-        "after": [
-            # Ctrl+Q: detach and return to Kata TUI dashboard
-            "tmux bind-key -n C-q detach-client",
-        ],
         "windows": [],
     }
 

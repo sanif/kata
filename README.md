@@ -198,7 +198,7 @@ Once inside a tmux session, press `Ctrl+Space` to open the project switcher. Fuz
 
 ### 5. Return to Dashboard
 
-Press `Ctrl+Q` to detach from the current session. If **loop mode** is enabled, you'll automatically return to the Kata dashboard. Otherwise, you'll return to your terminal.
+Press `Prefix + d` (standard tmux detach) to leave the current session. If **loop mode** is enabled, you'll automatically return to the Kata dashboard. Otherwise, you'll return to your terminal.
 
 ```bash
 # Enable loop mode for automatic return to dashboard
@@ -431,12 +431,10 @@ When inside a Kata-managed tmux session:
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+Q` | Detach from session (returns to dashboard if loop mode enabled) |
+| `Prefix + d` | Detach from session (returns to dashboard if loop mode enabled) |
 | `Ctrl+Space` | Open project switcher (fzf popup) |
 
-These keybindings are automatically configured when sessions are created.
-
-**Note:** `Ctrl+Q` is Kata's convenience binding for quick detach. The standard tmux detach (`Prefix + d`) also works and both will trigger the return loop if enabled.
+`Prefix + d` is the standard tmux detach. `Ctrl+Space` is automatically configured when sessions are created.
 
 ---
 
@@ -684,7 +682,7 @@ kata routine add important-project -p
 ```bash
 kata loop enable
 ```
-Now pressing `Ctrl+Q` takes you back to the dashboard instead of the bare terminal.
+Now detaching (`Prefix + d`) takes you back to the dashboard instead of the bare terminal.
 
 ### Fast Project Switching
 Inside any Kata session, press `Ctrl+Space` for instant fuzzy search across all projects.
