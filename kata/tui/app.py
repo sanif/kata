@@ -12,11 +12,11 @@ from kata.core.settings import get_settings
 from kata.services.registry import get_registry
 from kata.services.sessions import kill_session, launch_or_attach, launch_or_attach_adhoc, session_exists
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
+from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
 from kata.tui.screens.wizard import AddWizard
 from kata.tui.widgets.preview import PreviewPane
 from kata.tui.widgets.recents import RecentsPanel
-from kata.tui.widgets.search import SearchInput
 from kata.tui.widgets.tree import ProjectTree
 from kata.utils.zoxide import ZoxideEntry
 
@@ -126,7 +126,6 @@ class KataDashboard(App):
         Binding("e", "edit_project", "Edit"),
         Binding("r", "refresh", "Refresh"),
         Binding("/", "search", "Search"),
-        Binding("escape", "cancel_search", "Cancel", show=False),
         Binding("?", "help", "Help"),
         Binding("m", "context_menu", "Menu"),
         Binding("s", "settings", "Settings"),
@@ -150,7 +149,6 @@ class KataDashboard(App):
             yield Container(EmptyState(), id="main-container")
         else:
             yield Container(
-                SearchInput(id="search"),
                 Vertical(
                     Horizontal(
                         Container(ProjectTree(), id="tree-container"),
@@ -221,24 +219,23 @@ class KataDashboard(App):
             pass
 
     def action_search(self) -> None:
-        """Toggle search input."""
-        try:
-            search = self.query_one(SearchInput)
-            if search.visible:
-                search.hide()
-            else:
-                search.show()
-        except Exception:
-            pass
+        """Open search modal."""
+        self.push_screen(SearchModal(), self._on_search_result)
 
-    def action_cancel_search(self) -> None:
-        """Cancel search and hide input."""
-        try:
-            search = self.query_one(SearchInput)
-            if search.visible:
-                search.hide()
-        except Exception:
-            pass
+    def _on_search_result(self, result: Project | ZoxideEntry | None) -> None:
+        """Handle search modal result."""
+        if result is None:
+            return
+
+        if isinstance(result, Project):
+            result.record_open()
+            registry = get_registry()
+            registry.update(result)
+            self._project_to_launch = result
+            self.exit()
+        elif isinstance(result, ZoxideEntry):
+            self._zoxide_to_launch = result
+            self.exit()
 
     def action_launch(self) -> None:
         """Launch the selected project or zoxide entry."""
@@ -474,35 +471,6 @@ class KataDashboard(App):
         """Handle project highlight (cursor movement)."""
         preview = self.query_one(PreviewPane)
         preview.update_project(event.project)
-
-    @on(SearchInput.SearchChanged)
-    def on_search_changed(self, event: SearchInput.SearchChanged) -> None:
-        """Handle search query changes."""
-        try:
-            tree = self.query_one(ProjectTree)
-            tree.filter_projects(event.query)
-        except Exception:
-            pass
-        try:
-            recents = self.query_one(RecentsPanel)
-            recents.filter_recents(event.query)
-        except Exception:
-            pass
-
-    @on(SearchInput.SearchCancelled)
-    def on_search_cancelled(self, event: SearchInput.SearchCancelled) -> None:
-        """Handle search cancellation."""
-        try:
-            tree = self.query_one(ProjectTree)
-            tree.refresh_projects()
-        except Exception:
-            pass
-        try:
-            recents = self.query_one(RecentsPanel)
-            recents.filter_recents("")
-        except Exception:
-            pass
-
 
 def run_dashboard() -> None:
     """Run the Kata dashboard."""
