@@ -35,6 +35,7 @@ class Project:
     created_at: datetime = field(default_factory=datetime.now)
     last_opened: datetime | None = None
     times_opened: int = 0
+    shortcut: int | None = None  # Quick launch shortcut (1-9)
 
     def __post_init__(self) -> None:
         """Ensure path is absolute and config is set."""
@@ -52,6 +53,7 @@ class Project:
             "created_at": self.created_at.isoformat(),
             "last_opened": self.last_opened.isoformat() if self.last_opened else None,
             "times_opened": self.times_opened,
+            "shortcut": self.shortcut,
         }
 
     @classmethod
@@ -67,6 +69,7 @@ class Project:
                 datetime.fromisoformat(data["last_opened"]) if data.get("last_opened") else None
             ),
             times_opened=data.get("times_opened", 0),
+            shortcut=data.get("shortcut"),
         )
 
     @classmethod
