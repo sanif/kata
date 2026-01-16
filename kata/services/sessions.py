@@ -267,3 +267,253 @@ def get_all_kata_sessions() -> list[str]:
         return [s.name for s in server.sessions if s.name]
     except Exception:
         return []
+
+
+def _parse_command(full_args: str) -> str:
+    """Parse full command args to extract meaningful command.
+
+    Examples:
+        "node /opt/homebrew/bin/nx run admin-panel:serve" -> "nx run admin-panel:serve"
+        "nvim ." -> "nvim"
+        "claude" -> "claude"
+        "python /path/to/script.py arg1" -> "python script.py arg1"
+
+    Args:
+        full_args: Full command line from ps args
+
+    Returns:
+        Parsed command suitable for shell_command
+    """
+    if not full_args:
+        return ""
+
+    parts = full_args.split()
+    if not parts:
+        return ""
+
+    first = parts[0]
+
+    # Handle node-wrapped commands (e.g., nx, npm scripts)
+    if first == "node" and len(parts) >= 2:
+        script_path = parts[1]
+        # Extract script name from path
+        script_name = Path(script_path).name
+        # Remove .js extension if present
+        if script_name.endswith(".js"):
+            script_name = script_name[:-3]
+        # If it's nx, npx, npm, etc., include remaining args
+        if script_name in ("nx", "npx", "npm", "yarn", "pnpm") and len(parts) > 2:
+            return f"{script_name} " + " ".join(parts[2:])
+        elif script_name in ("nx", "npx", "npm", "yarn", "pnpm"):
+            return script_name
+        else:
+            # For other node scripts, return the script name
+            return script_name
+
+    # Handle python-wrapped commands
+    if first in ("python", "python3") and len(parts) >= 2:
+        script_path = parts[1]
+        script_name = Path(script_path).name
+        if len(parts) > 2:
+            return f"python {script_name} " + " ".join(parts[2:])
+        return f"python {script_name}"
+
+    # For other commands, just return the base command name
+    return Path(first).name
+
+
+def get_session_layout(session_name: str) -> dict | None:
+    """Capture the current layout of a running tmux session.
+
+    Uses tmux CLI to get:
+    - Window names and layouts
+    - Pane count and current commands
+    - Working directories
+
+    Args:
+        session_name: Name of the session to capture
+
+    Returns:
+        Dictionary compatible with tmuxp YAML format, or None if capture fails
+    """
+    from typing import Any
+
+    if not session_exists(session_name):
+        return None
+
+    try:
+        # Get session start directory
+        result = subprocess.run(
+            ["tmux", "display-message", "-t", session_name, "-p", "#{session_path}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        start_dir = result.stdout.strip() if result.returncode == 0 else ""
+
+        # Get windows: "index|name|layout"
+        result = subprocess.run(
+            [
+                "tmux",
+                "list-windows",
+                "-t",
+                session_name,
+                "-F",
+                "#{window_index}|#{window_name}|#{window_layout}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        windows: list[dict[str, Any]] = []
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+
+            parts = line.split("|")
+            if len(parts) < 3:
+                continue
+
+            window_index, window_name, window_layout = parts[0], parts[1], parts[2]
+
+            # Get panes for this window (use pane_pid to find actual command)
+            panes_result = subprocess.run(
+                [
+                    "tmux",
+                    "list-panes",
+                    "-t",
+                    f"{session_name}:{window_index}",
+                    "-F",
+                    "#{pane_pid}|#{pane_current_path}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+            panes: list[dict[str, Any]] = []
+            if panes_result.returncode == 0:
+                # Get all processes with full args for efficiency
+                ps_result = subprocess.run(
+                    ["ps", "-eo", "pid,ppid,args"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                ps_lines = ps_result.stdout.strip().split("\n") if ps_result.returncode == 0 else []
+
+                for pane_line in panes_result.stdout.strip().split("\n"):
+                    if pane_line:
+                        pane_parts = pane_line.split("|", 1)
+                        pane_pid = pane_parts[0] if pane_parts else ""
+                        path = pane_parts[1] if len(pane_parts) > 1 else ""
+
+                        # Find child processes of shell (collect all, pick best)
+                        cmd = ""
+                        if pane_pid:
+                            # Collect all children
+                            children = []
+                            for ps_line in ps_lines:
+                                ps_parts = ps_line.split(None, 2)  # Split into 3 parts max
+                                if len(ps_parts) >= 3 and ps_parts[1] == pane_pid:
+                                    full_args = ps_parts[2]
+                                    parsed = _parse_command(full_args)
+                                    children.append(parsed)
+
+                            # Pick best child: prefer non-runtime commands, else last one
+                            runtime_cmds = {"node", "python", "python3", "ruby", "perl"}
+                            for child in children:
+                                base_cmd = child.split()[0] if child else ""
+                                if base_cmd and base_cmd not in runtime_cmds:
+                                    cmd = child
+                                    break
+                            # If all are runtimes, use last child (most recent)
+                            if not cmd and children:
+                                cmd = children[-1]
+
+                        # Skip shells, use actual command
+                        shell_cmd = []
+                        if cmd and cmd not in ("zsh", "bash", "sh", "fish", "-zsh", "-bash", "-fish"):
+                            shell_cmd = [cmd]
+
+                        pane_entry: dict[str, Any] = {"shell_command": shell_cmd}
+                        # Add start_directory if different from session start
+                        if path and path != start_dir:
+                            pane_entry["start_directory"] = path
+
+                        panes.append(pane_entry)
+
+            if not panes:
+                panes = [{"shell_command": []}]
+
+            window_entry: dict[str, Any] = {
+                "window_name": window_name,
+                "panes": panes,
+            }
+
+            # Only add layout if it's a recognized preset
+            # tmux layouts are complex strings, but we can try to use them
+            if window_layout:
+                window_entry["layout"] = window_layout
+
+            windows.append(window_entry)
+
+        return {
+            "session_name": session_name,
+            "start_directory": start_dir,
+            "windows": windows,
+        }
+
+    except (subprocess.TimeoutExpired, Exception):
+        return None
+
+
+def save_current_session_layout(project: Project) -> Path:
+    """Save the current session layout to the project's config file.
+
+    Captures the live tmux session and writes it to the YAML config,
+    preserving Kata keybindings (Ctrl+Q, Ctrl+Space).
+
+    Args:
+        project: The project whose session to capture
+
+    Returns:
+        Path to the saved config file
+
+    Raises:
+        SessionError: If capture or writing fails
+    """
+    import yaml
+
+    from kata.core.config import ensure_config_dirs
+    from kata.core.templates import _base_template
+
+    if not session_exists(project.name):
+        raise SessionError(f"Session not found: {project.name}")
+
+    # Capture current layout
+    layout = get_session_layout(project.name)
+    if layout is None:
+        raise SessionError("Failed to capture session layout")
+
+    # Merge with base template to preserve keybindings
+    base = _base_template(project.name, project.path)
+    base["windows"] = layout["windows"]
+    if layout["start_directory"]:
+        base["start_directory"] = layout["start_directory"]
+
+    # Write to config file
+    ensure_config_dirs()
+    config_path = CONFIGS_DIR / project.config
+
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(base, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    except Exception as e:
+        raise SessionError(f"Failed to write config: {e}")
+
+    return config_path

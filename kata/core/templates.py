@@ -28,8 +28,8 @@ def _base_template(name: str, path: str) -> dict[str, Any]:
         "after": [
             # Ctrl+Q: detach and return to Kata TUI dashboard
             "tmux bind-key -n C-q detach-client",
-            # Ctrl+Space: project switcher popup
-            "tmux bind-key -n C-Space display-popup -E -w 60% -h 60% 'kata switch'",
+            # Ctrl+Space: fast project switcher popup (uses kata-switch script)
+            "tmux bind-key -n C-Space display-popup -E -w 60% -h 60% 'kata-switch'",
         ],
         "windows": [],
     }

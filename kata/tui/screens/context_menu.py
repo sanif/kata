@@ -17,9 +17,11 @@ from textual.widgets.option_list import Option
 from kata.core.models import Project
 from kata.services.registry import get_registry
 from kata.services.sessions import (
+    SessionError,
     SessionNotFoundError,
     get_session_status,
     kill_session,
+    save_current_session_layout,
     session_exists,
 )
 
@@ -32,6 +34,7 @@ class MenuAction(Enum):
     RENAME = auto()
     MOVE_GROUP = auto()
     OPEN_TERMINAL = auto()
+    SAVE_LAYOUT = auto()
 
 
 class ContextMenuScreen(ModalScreen[str | None]):
@@ -86,6 +89,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("r", "rename_project", "Rename", show=False),
         Binding("g", "move_group", "Move to Group", show=False),
         Binding("t", "open_terminal", "Open Terminal", show=False),
+        Binding("l", "save_layout", "Save Layout", show=False),
     ]
 
     # Allow pre-selecting an action when opening
@@ -120,6 +124,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 Option("[r] Rename Project", id="rename"),
                 Option("[g] Move to Group", id="move_group"),
                 Option("[t] Open in Terminal", id="open_terminal"),
+                Option("[l] Save Layout", id="save_layout"),
             ]
             yield OptionList(*options, id="menu-list")
 
@@ -150,6 +155,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_move_group()
         elif option_id == "open_terminal":
             self.action_open_terminal()
+        elif option_id == "save_layout":
+            self.action_save_layout()
 
     def action_cancel(self) -> None:
         """Cancel and close the menu."""
@@ -351,6 +358,27 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 continue
 
         raise RuntimeError("No supported terminal emulator found")
+
+    def action_save_layout(self) -> None:
+        """Save the current session layout to the project's config."""
+        if not session_exists(self.project.name):
+            self.app.notify(
+                "No active session to save",
+                severity="warning",
+            )
+            self.dismiss(None)
+            return
+
+        try:
+            config_path = save_current_session_layout(self.project)
+            self.app.notify(
+                f"Layout saved: {config_path.name}",
+                title="Success",
+            )
+            self.dismiss("layout_saved")
+        except SessionError as e:
+            self.app.notify(f"Failed to save layout: {e}", severity="error")
+            self.dismiss(None)
 
 
 class ConfirmDialog(ModalScreen[bool]):
