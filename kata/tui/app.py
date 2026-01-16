@@ -15,6 +15,7 @@ from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
 from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
 from kata.tui.screens.wizard import AddWizard
+from kata.tui.themes import KATA_THEMES
 from kata.tui.widgets.preview import PreviewPane
 from kata.tui.widgets.recents import RecentsPanel
 from kata.tui.widgets.tree import ProjectTree
@@ -47,6 +48,20 @@ class KataDashboard(App):
 
     TITLE = "▸ kata"
     SUB_TITLE = "workspace orchestrator"
+
+    # Register custom Kata themes
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Register all Kata themes
+        for theme in KATA_THEMES:
+            self.register_theme(theme)
+        # Set default theme based on settings
+        settings = get_settings()
+        theme_name = getattr(settings, "theme", "kata-dark")
+        if theme_name in [t.name for t in KATA_THEMES]:
+            self.theme = theme_name
+        else:
+            self.theme = "kata-dark"
 
     CSS = """
     Screen {

@@ -16,8 +16,8 @@ SETTINGS_FILE = KATA_CONFIG_DIR / "settings.json"
 # Legacy loop config file (for migration)
 LEGACY_LOOP_CONFIG = KATA_CONFIG_DIR / "loop_config.json"
 
-# Available themes
-AVAILABLE_THEMES = ["default", "light", "nord", "dracula", "solarized"]
+# Available themes (Kata custom themes)
+AVAILABLE_THEMES = ["kata-dark", "kata-light", "kata-ocean", "kata-warm"]
 
 
 @dataclass
@@ -27,16 +27,16 @@ class Settings:
     loop_enabled: bool = False
     default_group: str = "Uncategorized"
     refresh_interval: int = 5
-    theme: str = "default"
+    theme: str = "kata-dark"
 
     def __post_init__(self) -> None:
         """Validate and clamp values."""
         # Clamp refresh_interval to valid range (1-60)
         self.refresh_interval = max(1, min(60, self.refresh_interval))
 
-        # Validate theme
+        # Validate theme (allow legacy themes to fall back to kata-dark)
         if self.theme not in AVAILABLE_THEMES:
-            self.theme = "default"
+            self.theme = "kata-dark"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize settings to dictionary."""
