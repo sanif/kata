@@ -272,6 +272,15 @@ kata loop disable                 # Disable return loop
 
 When enabled, the dashboard re-launches after you detach from any session.
 
+#### `kata migrate`
+Migrate configs from legacy central location to project folders.
+
+```bash
+kata migrate
+```
+
+This moves config files from `~/.config/kata/configs/` to each project's folder as `.kata.yaml`. Migration also happens automatically when launching a session.
+
 ---
 
 ## TUI Dashboard
@@ -314,6 +323,9 @@ Launch with `kata` (no arguments).
 | `m` | Open context menu |
 | `s` | Open settings |
 | `/` | Toggle search |
+| `Tab` | Switch between projects and recents |
+| `[` | Focus projects panel |
+| `]` | Focus recents panel |
 | `Escape` | Cancel/close |
 | `?` | Show help |
 | `k` | Quick kill session |
@@ -340,7 +352,7 @@ Press `s` to configure:
 - **Return Loop** - Auto-relaunch dashboard after detach
 - **Default Group** - Group for new projects
 - **Refresh Interval** - Status update frequency (1-60 seconds)
-- **Theme** - Visual theme (default, light, nord, dracula, solarized)
+- **Theme** - Visual theme (kata-dark, kata-light, kata-ocean, kata-warm)
 
 ---
 
@@ -452,19 +464,20 @@ Done! Launched: 3, Skipped: 1, Failed: 1
 
 ## Configuration Files
 
-Kata stores configuration in `~/.config/kata/`:
+Kata stores global configuration in `~/.config/kata/` and project configs in each project folder:
 
 ```
 ~/.config/kata/
 ├── registry.json      # Project registry
 ├── settings.json      # App settings
 ├── routine.json       # Morning routine config
-├── tree_state.json    # TUI tree expansion state
-└── configs/           # tmuxp YAML configs
-    ├── my-app.yaml
-    ├── frontend.yaml
-    └── ...
+└── tree_state.json    # TUI tree expansion state
+
+~/projects/my-app/
+└── .kata.yaml         # tmuxp config for this project
 ```
+
+Each project's tmux configuration is stored as `.kata.yaml` in the project directory itself, making it easy to version control with the project.
 
 ### registry.json
 ```json
@@ -490,7 +503,7 @@ Kata stores configuration in `~/.config/kata/`:
   "loop_enabled": true,
   "default_group": "Uncategorized",
   "refresh_interval": 5,
-  "theme": "default"
+  "theme": "kata-dark"
 }
 ```
 
@@ -502,11 +515,10 @@ Available themes for the TUI:
 
 | Theme | Description |
 |-------|-------------|
-| `default` | Dark theme with balanced colors |
-| `light` | Light background theme |
-| `nord` | Arctic, bluish color palette |
-| `dracula` | Dark theme with vibrant colors |
-| `solarized` | Precision colors for readability |
+| `kata-dark` | Dark theme with cyan/violet accents (default) |
+| `kata-light` | Light background with warm accents |
+| `kata-ocean` | Deep ocean blue palette |
+| `kata-warm` | Cozy warm tones with amber highlights |
 
 Change theme in settings (`s` in TUI) or:
 ```bash
