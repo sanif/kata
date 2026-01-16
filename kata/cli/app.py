@@ -920,6 +920,35 @@ def switch_preview(
     console.print(f"[cyan]Last:[/cyan]    {last_opened}")
 
 
+@app.command()
+def migrate() -> None:
+    """Migrate configs from legacy location to project folders.
+
+    Moves config files from ~/.config/kata/configs/ to each project's
+    folder as .kata.yaml
+    """
+    from kata.core.config import migrate_all_configs
+
+    console.print("Migrating config files to project folders...")
+
+    results = migrate_all_configs()
+
+    if not results:
+        console.print("[dim]No configs to migrate.[/dim]")
+        return
+
+    migrated = sum(1 for v in results.values() if v)
+    skipped = len(results) - migrated
+
+    for name, success in results.items():
+        if success:
+            console.print(f"  [green]✓[/green] {name}")
+        else:
+            console.print(f"  [dim]○[/dim] {name} [dim](already migrated or not found)[/dim]")
+
+    console.print(f"\n[bold]Done![/bold] Migrated: {migrated}, Skipped: {skipped}")
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Kata - Terminal-centric workspace orchestrator for tmux.

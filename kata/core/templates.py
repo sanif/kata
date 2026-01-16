@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from kata.core.config import CONFIGS_DIR, ensure_config_dirs
+from kata.core.config import ensure_config_dirs, get_project_config_path
 from kata.core.models import Project, ProjectType
 
 
@@ -302,7 +302,7 @@ def write_template(
     project_type: ProjectType,
     layout_preset: LayoutPreset | None = None,
 ) -> Path:
-    """Write a tmuxp template to the config directory.
+    """Write a tmuxp template to the project directory.
 
     Args:
         project: The project to write template for
@@ -310,12 +310,12 @@ def write_template(
         layout_preset: Layout preset to use (defaults to STANDARD)
 
     Returns:
-        Path to the written config file
+        Path to the written config file (.kata.yaml in project dir)
     """
     ensure_config_dirs()
 
     template = render_template(project, project_type, layout_preset)
-    config_path = CONFIGS_DIR / project.config
+    config_path = get_project_config_path(project.path)
 
     # Write YAML with proper formatting
     with open(config_path, "w", encoding="utf-8") as f:
@@ -331,9 +331,9 @@ def get_template_path(project: Project) -> Path:
         project: The project
 
     Returns:
-        Path to the config file (may not exist)
+        Path to the config file (.kata.yaml in project dir, may not exist)
     """
-    return CONFIGS_DIR / project.config
+    return get_project_config_path(project.path)
 
 
 def template_exists(project: Project) -> bool:
