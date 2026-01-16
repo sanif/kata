@@ -1,5 +1,8 @@
 """Recents panel widget for displaying zoxide entries."""
 
+import os
+
+from textual.binding import Binding
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static, OptionList
@@ -28,15 +31,13 @@ class RecentsPanel(Widget):
         width: 100%;
         height: 100%;
         background: $background;
-        border-top: solid $surface-lighten-1;
     }
 
     RecentsPanel #recents-header {
         width: 100%;
         height: 1;
-        padding: 0 1;
+        padding: 0 2;
         background: $surface;
-        color: $text-muted;
     }
 
     RecentsPanel #recents-list {
@@ -44,14 +45,23 @@ class RecentsPanel(Widget):
         height: 1fr;
         background: $background;
         padding: 0 1;
+        scrollbar-size: 1 1;
     }
 
     RecentsPanel #recents-list:focus {
         border: none;
     }
 
+    RecentsPanel #recents-list > .option-list--option {
+        padding: 0 1;
+    }
+
     RecentsPanel #recents-list > .option-list--option-highlighted {
-        background: $surface;
+        background: $primary 20%;
+    }
+
+    RecentsPanel #recents-list:focus > .option-list--option-highlighted {
+        background: $primary 30%;
     }
 
     RecentsPanel #recents-empty {
@@ -63,6 +73,10 @@ class RecentsPanel(Widget):
     }
     """
 
+    BINDINGS = [
+        Binding("a", "add_selected", "Add", show=False),
+    ]
+
     class RecentSelected(Message, bubble=True):
         """Message sent when a recent entry is selected."""
 
@@ -72,6 +86,13 @@ class RecentsPanel(Widget):
 
     class RecentHighlighted(Message, bubble=True):
         """Message sent when a recent entry is highlighted."""
+
+        def __init__(self, entry: ZoxideEntry) -> None:
+            super().__init__()
+            self.entry = entry
+
+    class AddRequested(Message, bubble=True):
+        """Message sent when user wants to add the selected entry as a project."""
 
         def __init__(self, entry: ZoxideEntry) -> None:
             super().__init__()
@@ -91,7 +112,11 @@ class RecentsPanel(Widget):
 
     def compose(self):
         """Compose the widget."""
-        yield Static("[dim]󰋚 recents[/dim]  [dim](Tab to switch)[/dim]", id="recents-header")
+        yield Static(
+            "[bold yellow]󰋚[/bold yellow] [dim]recents[/dim]  "
+            "[dim italic]Tab: switch · a: add · Enter: open[/dim]",
+            id="recents-header",
+        )
         yield OptionList(id="recents-list")
 
     def on_mount(self) -> None:
@@ -138,7 +163,15 @@ class RecentsPanel(Widget):
         for entry in entries:
             project_type = detect_project_type(entry.path)
             type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
-            label = f"[yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
+
+            # Shorten path for display (show ~/ for home)
+            display_path = entry.path
+            home = os.path.expanduser("~")
+            if display_path.startswith(home):
+                display_path = "~" + display_path[len(home):]
+
+            # Format: icon name (dimmed path)
+            label = f"[yellow]{type_icon}[/yellow] [bold]{entry.name}[/bold]  [dim]{display_path}[/dim]"
             option_list.add_option(Option(label, id=entry.path))
 
     def filter_recents(self, query: str) -> None:
@@ -202,3 +235,9 @@ class RecentsPanel(Widget):
             option_list.focus()
         except Exception:
             pass
+
+    def action_add_selected(self) -> None:
+        """Request to add the selected entry as a project."""
+        entry = self.get_selected_entry()
+        if entry:
+            self.post_message(self.AddRequested(entry))
