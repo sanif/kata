@@ -158,13 +158,11 @@ def launch_session(project: Project) -> None:
         raise ConfigNotFoundError(f"Config file not found: {config_path}")
 
     try:
-        # Use tmuxp to load the session in detached mode
         result = subprocess.run(
             ["tmuxp", "load", "-d", str(config_path)],
             capture_output=True,
             text=True,
         )
-
         if result.returncode != 0:
             raise SessionError(f"Failed to launch session: {result.stderr}")
     except FileNotFoundError:
@@ -208,18 +206,17 @@ def attach_session(session_name: str) -> None:
         raise SessionNotFoundError(f"Session not found: {session_name}")
 
     try:
-        # Try to get client TTY (works even in popups)
-        client_tty = _get_tmux_client()
+        inside_tmux = is_inside_tmux()
 
-        if client_tty or is_inside_tmux():
-            # Inside tmux (or popup): switch to the target session
-            cmd = ["tmux", "switch-client", "-t", session_name]
-            if client_tty:
-                # Explicit client needed for popups
-                cmd.extend(["-c", client_tty])
-            subprocess.run(cmd, check=True)
+        if inside_tmux:
+            # Inside tmux (pane or popup): switch to the target session
+            result = subprocess.run(
+                ["tmux", "switch-client", "-t", session_name],
+            )
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, "switch-client")
         else:
-            # Outside tmux: attach to the session
+            # Outside tmux: attach to the session (this blocks until detach)
             subprocess.run(
                 ["tmux", "attach-session", "-t", session_name],
                 check=True,
@@ -267,10 +264,16 @@ def launch_or_attach(project: Project) -> None:
     else:
         launch_session(project)
         # Wait for session to be ready (tmuxp may take a moment)
-        for _ in range(10):
+        session_ready = False
+        for _ in range(20):
             if session_exists(project.name):
+                session_ready = True
                 break
             time.sleep(0.1)
+
+        if not session_ready:
+            raise SessionError(f"Session '{project.name}' failed to start within timeout")
+
         attach_session(project.name)
 
 
@@ -385,16 +388,21 @@ def launch_or_attach_adhoc(directory: str) -> None:
     directory_path = Path(directory).expanduser().resolve()
     base_name = directory_path.name
 
-    # Check if session already exists with this name
     if session_exists(base_name):
         attach_session(base_name)
     else:
         session_name = launch_adhoc_session(directory)
         # Wait for session to be ready
-        for _ in range(10):
+        session_ready = False
+        for _ in range(20):
             if session_exists(session_name):
+                session_ready = True
                 break
             time.sleep(0.1)
+
+        if not session_ready:
+            raise SessionError(f"Session '{session_name}' failed to start within timeout")
+
         attach_session(session_name)
 
 

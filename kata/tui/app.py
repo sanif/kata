@@ -568,9 +568,9 @@ def run_dashboard() -> None:
         try:
             launch_or_attach(project)
         except Exception as e:
-            print(f"Error launching session: {e}")
+            print(f"Error: {e}")
     elif zoxide_entry:
         try:
             launch_or_attach_adhoc(zoxide_entry.path)
         except Exception as e:
-            print(f"Error launching session: {e}")
+            print(f"Error: {e}")
