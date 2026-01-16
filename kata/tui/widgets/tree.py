@@ -11,7 +11,7 @@ from textual.widgets.tree import TreeNode
 from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project, SessionStatus
 from kata.services.registry import get_registry
-from kata.services.sessions import get_session_status
+from kata.services.sessions import get_all_session_statuses, get_session_status
 from kata.utils.detection import detect_project_type
 from kata.utils.git import format_git_indicator_rich, get_git_status
 
@@ -106,11 +106,59 @@ class ProjectTree(Widget):
 
     def on_mount(self) -> None:
         """Set up the tree when mounted."""
-        self.refresh_projects()
+        # Initial build without status (faster startup)
+        self._build_tree_initial()
         # Auto-highlight first project after a brief delay
         self.call_later(self._highlight_first_project)
         # Focus the tree for keyboard navigation
         self.call_later(self._focus_tree)
+
+    def _build_tree_initial(self) -> None:
+        """Build initial tree structure (status will be updated separately)."""
+        tree = self.query_one("#project-tree", Tree)
+        tree.clear()
+
+        registry = get_registry()
+        projects = registry.list_all()
+
+        # Group projects by group name
+        groups: dict[str, list[Project]] = {}
+        for project in projects:
+            group_name = project.group or "Uncategorized"
+            if group_name not in groups:
+                groups[group_name] = []
+            groups[group_name].append(project)
+
+        # Sort groups and projects - use IDLE status initially
+        self._projects_by_name.clear()
+        for group_name in sorted(groups.keys()):
+            group_key = group_name.lower()
+            group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
+            group_label = f"[dim]{group_icon} {group_name.lower()}[/dim]"
+
+            group_node = tree.root.add(group_label, expand=group_name in self._expanded_groups)
+            group_node.data = {"type": "group", "name": group_name}
+
+            for project in sorted(groups[group_name], key=lambda p: p.name):
+                # Use IDLE status initially - will be updated by refresh
+                indicator = self._get_status_indicator(SessionStatus.IDLE)
+
+                project_type = detect_project_type(project.path)
+                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+
+                git_status = get_git_status(project.path)
+                git_indicator = format_git_indicator_rich(git_status)
+
+                if git_indicator:
+                    label = f"{indicator} {type_icon} {project.name} [dim]{git_indicator}[/dim]"
+                else:
+                    label = f"{indicator} {type_icon} {project.name}"
+
+                project_node = group_node.add_leaf(label)
+                project_node.data = {"type": "project", "project": project}
+                self._projects_by_name[project.name] = project
+
+        tree.root.expand()
 
     def _focus_tree(self) -> None:
         """Focus the inner tree widget."""
@@ -187,6 +235,9 @@ class ProjectTree(Widget):
         registry = get_registry()
         projects = registry.list_all()
 
+        # Get all session statuses in one batch call (more efficient)
+        all_statuses = get_all_session_statuses()
+
         # Group projects by group name
         groups: dict[str, list[Project]] = {}
         for project in projects:
@@ -207,7 +258,8 @@ class ProjectTree(Widget):
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                status = get_session_status(project.name)
+                # Use batched status, fall back to IDLE if not found
+                status = all_statuses.get(project.name, SessionStatus.IDLE)
                 indicator = self._get_status_indicator(status)
 
                 # Get project type icon
@@ -308,6 +360,9 @@ class ProjectTree(Widget):
         registry = get_registry()
         projects = registry.list_all()
 
+        # Get all session statuses in one batch call
+        all_statuses = get_all_session_statuses()
+
         # Filter and group
         groups: dict[str, list[Project]] = {}
         for project in projects:
@@ -329,7 +384,8 @@ class ProjectTree(Widget):
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                status = get_session_status(project.name)
+                # Use batched status, fall back to IDLE if not found
+                status = all_statuses.get(project.name, SessionStatus.IDLE)
                 indicator = self._get_status_indicator(status)
 
                 # Get project type icon
