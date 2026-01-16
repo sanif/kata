@@ -248,6 +248,16 @@ class ProjectTree(Widget):
     def refresh_projects(self) -> None:
         """Refresh the project tree from registry."""
         tree = self.query_one("#project-tree", Tree)
+
+        # Capture current expanded state before clearing
+        for node in tree.root.children:
+            if node.data and node.data.get("type") == "group":
+                group_name = node.data.get("name")
+                if node.is_expanded:
+                    self._expanded_groups.add(group_name)
+                else:
+                    self._expanded_groups.discard(group_name)
+
         tree.clear()
 
         registry = get_registry()
