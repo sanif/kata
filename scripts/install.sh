@@ -289,28 +289,41 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
         INSTALL_METHOD="pip"
     fi
 
+    # Check Python version (requires 3.10+)
+    PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [[ "$PYTHON_MAJOR" -lt 3 ]] || [[ "$PYTHON_MAJOR" -eq 3 && "$PYTHON_MINOR" -lt 10 ]]; then
+        error "Python 3.10+ required. Found: Python $PYTHON_VERSION"
+        info "Install Python 3.10+ and try again"
+        exit 1
+    fi
+
+    info "Using Python $PYTHON_VERSION"
     info "Installing with $INSTALL_METHOD..."
 
     install_kata() {
         case "$INSTALL_METHOD" in
             pipx)
-                # pipx creates isolated environment, cleanest install
-                pipx install . --force 2>/dev/null || pipx install .
+                # pipx creates isolated environment, specify python3 to use correct version
+                # --verbose shows pip errors, --force reinstalls if exists
+                pipx install . --force --python python3 --verbose
                 ;;
             uv)
                 # uv pip with --system for global install
-                uv pip install --system . --quiet
+                uv pip install --system .
                 ;;
             pip)
-                $pip_cmd install . --quiet 2>/dev/null || $pip_cmd install --user . --quiet
+                $pip_cmd install . || $pip_cmd install --user .
                 ;;
         esac
     }
 
     # Try to install, upgrade pip if it fails
-    if ! install_kata 2>/dev/null; then
+    if ! install_kata; then
         warn "Installation failed, trying to upgrade pip first..."
-        python3 -m pip install --upgrade pip --quiet 2>/dev/null || true
+        python3 -m pip install --upgrade pip || true
 
         if ! install_kata; then
             error "Failed to install kata. Please check your Python/pip setup."
