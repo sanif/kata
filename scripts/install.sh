@@ -284,6 +284,14 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
     fi
 
     success "Kata installed from source"
+
+    # Rehash pyenv/rbenv/asdf if in use (updates shims)
+    if command -v pyenv &> /dev/null; then
+        pyenv rehash 2>/dev/null || true
+    fi
+    if command -v asdf &> /dev/null; then
+        asdf reshim python 2>/dev/null || true
+    fi
 else
     error "Could not find kata source. Run this script from the kata directory."
     exit 1
