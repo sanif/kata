@@ -275,20 +275,36 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
     # Installing from source
     cd "$KATA_DIR"
 
-    pip_cmd=$(get_pip_cmd) || {
-        error "No pip command found. Please install pip and re-run."
-        exit 1
-    }
+    # Determine best install method: pipx > uv > pip
+    INSTALL_METHOD=""
+    if command -v pipx &> /dev/null; then
+        INSTALL_METHOD="pipx"
+    elif command -v uv &> /dev/null; then
+        INSTALL_METHOD="uv"
+    else
+        pip_cmd=$(get_pip_cmd) || {
+            error "No pip/pipx/uv found. Install one of: pipx, uv, pip"
+            exit 1
+        }
+        INSTALL_METHOD="pip"
+    fi
 
-    info "Installing with $pip_cmd..."
+    info "Installing with $INSTALL_METHOD..."
 
     install_kata() {
-        if [[ "$pip_cmd" == "uv pip" ]]; then
-            # Use --system to install globally, not into local .venv
-            uv pip install --system . --quiet
-        else
-            $pip_cmd install . --quiet 2>/dev/null || $pip_cmd install --user . --quiet
-        fi
+        case "$INSTALL_METHOD" in
+            pipx)
+                # pipx creates isolated environment, cleanest install
+                pipx install . --force 2>/dev/null || pipx install .
+                ;;
+            uv)
+                # uv pip with --system for global install
+                uv pip install --system . --quiet
+                ;;
+            pip)
+                $pip_cmd install . --quiet 2>/dev/null || $pip_cmd install --user . --quiet
+                ;;
+        esac
     }
 
     # Try to install, upgrade pip if it fails
