@@ -1,7 +1,7 @@
 [project]
 name = "kata-workspace"
 dynamic = ["version"]
-description = "Terminal-centric workspace orchestrator for tmux"
+description = "Terminal-centric workspace orchestrator for tmux power users"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Kata Contributors" }]
