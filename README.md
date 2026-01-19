@@ -46,7 +46,19 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 
 ## Installation
 
-### Quick Install (Recommended)
+### Quick Install via PyPI (Recommended)
+
+```bash
+# With pipx (isolated environment, recommended)
+pipx install kata-workspace --python python3.11
+
+# Or with pip
+pip install kata-workspace
+```
+
+Then configure tmux (see [Configure Tmux](#configure-tmux) below).
+
+### Install from Source
 
 ```bash
 # Clone and run the install script
@@ -56,8 +68,9 @@ cd kata
 ```
 
 The install script will:
+- Check Python version (requires 3.10+)
 - Check and install prerequisites (tmux, fzf, tmuxp)
-- Install Kata
+- Install Kata via pipx/uv/pip (in that order of preference)
 - Configure tmux keybindings (Ctrl+Space for switching)
 - Optionally enable return loop
 
@@ -65,7 +78,7 @@ The install script will:
 
 #### Prerequisites
 
-- **Python 3.10+**
+- **Python 3.10+** (required)
 - **tmux** (terminal multiplexer)
 - **tmuxp** (tmux session manager)
 - **fzf** (fuzzy finder) - for project switching
@@ -73,11 +86,11 @@ The install script will:
 
 ```bash
 # macOS
-brew install tmux fzf zoxide
+brew install python@3.11 tmux fzf zoxide
 pip install tmuxp
 
 # Ubuntu/Debian
-sudo apt install tmux fzf
+sudo apt install python3.10 tmux fzf
 curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
 pip install tmuxp
 ```
@@ -85,15 +98,14 @@ pip install tmuxp
 #### Install Kata
 
 ```bash
-# Clone the repository
+# From PyPI (recommended)
+pipx install kata-workspace --python python3.11
+# Or: pip install kata-workspace
+
+# From source
 git clone https://github.com/kata-workspace/kata.git
 cd kata
-
-# Install with uv (recommended)
-uv pip install -e .
-
-# Or with pip
-pip install -e .
+pip install .
 ```
 
 #### Configure Tmux
@@ -118,8 +130,14 @@ Then reload: `tmux source ~/.tmux.conf`
 Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
 
 ```bash
-export EDITOR=nvim  # or your preferred editor
+# Set your preferred editor (required for kata edit command)
+export EDITOR=nvim   # or: vim, code, nano, etc.
+
+# Alternative: use VISUAL for GUI editors
+export VISUAL=code   # VS Code, Sublime, etc.
 ```
+
+**Note:** Kata uses `$EDITOR` (or `$VISUAL`) for the `kata edit` command. If neither is set, it falls back to `nano` → `vim` → `vi`.
 
 ### Available Scripts
 
@@ -652,6 +670,8 @@ Available themes for the TUI:
 | `kata-light` | Light background with warm accents |
 | `kata-ocean` | Deep ocean blue palette |
 | `kata-warm` | Cozy warm tones with amber highlights |
+| `kata-glass` | Frosted glass aesthetic - muted dark blue-gray |
+| `kata-glass-light` | Light frosted glass - soft whites and silvers |
 
 Change theme in settings (`s` in TUI) or:
 ```bash
