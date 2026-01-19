@@ -298,29 +298,47 @@ ensure_path() {
         export PATH="$bin_dir:$PATH"
     fi
 
-    # Detect shell config file
+    # Check if PATH is already configured in any common profile
+    local all_profiles=(
+        "$HOME/.zshrc"
+        "$HOME/.bashrc"
+        "$HOME/.bash_profile"
+        "$HOME/.profile"
+        "$HOME/.zprofile"
+    )
+
+    for profile in "${all_profiles[@]}"; do
+        if [[ -f "$profile" ]] && grep -q '\.local/bin' "$profile"; then
+            success "PATH already configured in $profile"
+            return 0
+        fi
+    done
+
+    # Detect which shell config to use
     local shell_config=""
     if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
         shell_config="$HOME/.zshrc"
     elif [[ -n "$BASH_VERSION" ]] || [[ "$SHELL" == *"bash"* ]]; then
+        # Prefer existing profile, otherwise use .bashrc
         if [[ -f "$HOME/.bash_profile" ]]; then
             shell_config="$HOME/.bash_profile"
+        elif [[ -f "$HOME/.profile" ]]; then
+            shell_config="$HOME/.profile"
         else
             shell_config="$HOME/.bashrc"
         fi
+    else
+        # Fallback to .profile (POSIX standard)
+        shell_config="$HOME/.profile"
     fi
 
-    # Add to shell config if not already there
+    # Add PATH to shell config
     if [[ -n "$shell_config" ]]; then
         local path_line='export PATH="$HOME/.local/bin:$PATH"'
-        if [[ -f "$shell_config" ]] && grep -q '\.local/bin' "$shell_config"; then
-            success "PATH already configured in $shell_config"
-        else
-            echo "" >> "$shell_config"
-            echo "# Added by kata installer" >> "$shell_config"
-            echo "$path_line" >> "$shell_config"
-            success "Added ~/.local/bin to PATH in $shell_config"
-        fi
+        echo "" >> "$shell_config"
+        echo "# Added by kata installer" >> "$shell_config"
+        echo "$path_line" >> "$shell_config"
+        success "Added ~/.local/bin to PATH in $shell_config"
     fi
 }
 
