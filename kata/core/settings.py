@@ -17,7 +17,14 @@ SETTINGS_FILE = KATA_CONFIG_DIR / "settings.json"
 LEGACY_LOOP_CONFIG = KATA_CONFIG_DIR / "loop_config.json"
 
 # Available themes (Kata custom themes)
-AVAILABLE_THEMES = ["kata-dark", "kata-light", "kata-ocean", "kata-warm"]
+AVAILABLE_THEMES = [
+    "kata-dark",
+    "kata-light",
+    "kata-ocean",
+    "kata-warm",
+    "kata-glass",
+    "kata-glass-light",
+]
 
 
 @dataclass
