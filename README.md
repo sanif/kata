@@ -48,8 +48,21 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 
 ### Quick Install via PyPI (Recommended)
 
+**Prerequisites:** Python 3.10+, tmux, fzf, tmuxp, zoxide (optional)
+
 ```bash
-# With pipx (isolated environment, recommended)
+# macOS - install prerequisites
+brew install python@3.11 tmux fzf zoxide
+pip install tmuxp
+
+# Ubuntu/Debian - install prerequisites
+sudo apt install python3.10 tmux fzf
+pip install tmuxp
+# zoxide: curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
+```
+
+```bash
+# Install kata (with pipx - recommended)
 pipx install kata-workspace --python python3.11
 
 # Or with pip
