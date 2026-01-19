@@ -1,5 +1,5 @@
 [project]
-name = "kata"
+name = "kata-workspace"
 version = "0.1.0"
 description = "Terminal-centric workspace orchestrator for tmux"
 requires-python = ">=3.10"

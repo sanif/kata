@@ -56,3 +56,5 @@ Thumbs.db
 # Logs
 *.log
 /tmp/
+.token
+dist/
