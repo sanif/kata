@@ -25,23 +25,15 @@ def temp_registry_file():
 
 
 @pytest.fixture
-def temp_configs_dir():
-    """Create a temporary configs directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
-
-
-@pytest.fixture
-def mock_registry(temp_registry_file, temp_configs_dir):
+def mock_registry(temp_registry_file):
     """Set up mock registry and config directories."""
     with patch("kata.services.registry.REGISTRY_FILE", temp_registry_file):
         with patch("kata.services.registry.ensure_config_dirs"):
-            with patch("kata.core.templates.CONFIGS_DIR", temp_configs_dir):
-                with patch("kata.core.templates.ensure_config_dirs"):
-                    # Reset singleton
-                    import kata.services.registry as reg_module
-                    reg_module._registry = None
-                    yield
+            with patch("kata.core.config.ensure_config_dirs"):
+                # Reset singleton
+                import kata.services.registry as reg_module
+                reg_module._registry = None
+                yield
 
 
 class TestAddCommand:
@@ -287,7 +279,7 @@ class TestLaunchCommand:
         assert result.exit_code == 1
         assert "not found" in result.stdout
 
-    def test_launch_project(self, mock_registry, tmp_path, temp_configs_dir):
+    def test_launch_project(self, mock_registry, tmp_path):
         """Test launching a project."""
         runner.invoke(app, ["add", str(tmp_path)])
 
