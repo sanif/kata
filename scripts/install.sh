@@ -305,6 +305,7 @@ ensure_path() {
         "$HOME/.bash_profile"
         "$HOME/.profile"
         "$HOME/.zprofile"
+        "$HOME/.config/fish/config.fish"
     )
 
     for profile in "${all_profiles[@]}"; do
@@ -316,7 +317,14 @@ ensure_path() {
 
     # Detect which shell config to use
     local shell_config=""
-    if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
+    local is_fish=false
+
+    if [[ "$SHELL" == *"fish"* ]]; then
+        is_fish=true
+        shell_config="$HOME/.config/fish/config.fish"
+        # Create fish config dir if needed
+        mkdir -p "$HOME/.config/fish"
+    elif [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
         shell_config="$HOME/.zshrc"
     elif [[ -n "$BASH_VERSION" ]] || [[ "$SHELL" == *"bash"* ]]; then
         # Prefer existing profile, otherwise use .bashrc
@@ -334,10 +342,13 @@ ensure_path() {
 
     # Add PATH to shell config
     if [[ -n "$shell_config" ]]; then
-        local path_line='export PATH="$HOME/.local/bin:$PATH"'
         echo "" >> "$shell_config"
         echo "# Added by kata installer" >> "$shell_config"
-        echo "$path_line" >> "$shell_config"
+        if [[ "$is_fish" == true ]]; then
+            echo 'fish_add_path -g $HOME/.local/bin' >> "$shell_config"
+        else
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_config"
+        fi
         success "Added ~/.local/bin to PATH in $shell_config"
     fi
 }
