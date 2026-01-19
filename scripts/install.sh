@@ -48,9 +48,27 @@ detect_pkg_manager() {
     fi
 }
 
-# Get working pip command
+# Get the actual Python bin directory from PATH (handles pyenv/asdf correctly)
+get_python_bin_dir() {
+    local python_path
+    python_path=$(which python3 2>/dev/null)
+    if [[ -n "$python_path" ]]; then
+        dirname "$python_path"
+    fi
+}
+
+# Get working pip command - use the pip from PATH's Python
 get_pip_cmd() {
-    # Try uv first (fastest, handles everything)
+    local bin_dir
+    bin_dir=$(get_python_bin_dir)
+
+    # If we found a Python bin dir, prefer its pip
+    if [[ -n "$bin_dir" ]] && [[ -x "$bin_dir/pip3" ]]; then
+        echo "$bin_dir/pip3"
+        return 0
+    fi
+
+    # Try uv with --system (for global install)
     if command -v uv &> /dev/null; then
         echo "uv pip"
         return 0
@@ -286,12 +304,46 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
 
     success "Kata installed from source"
 
-    # Rehash pyenv/rbenv/asdf if in use (updates shims)
+    # Get the bin directory where kata should be installed
+    PYTHON_BIN_DIR=$(get_python_bin_dir)
+
+    # Rehash pyenv/asdf if in use (updates shims)
     if command -v pyenv &> /dev/null; then
         pyenv rehash 2>/dev/null || true
     fi
     if command -v asdf &> /dev/null; then
         asdf reshim python 2>/dev/null || true
+    fi
+
+    # Ensure kata binary exists in the correct location
+    if [[ -n "$PYTHON_BIN_DIR" ]] && [[ ! -f "$PYTHON_BIN_DIR/kata" ]]; then
+        # Find where kata was actually installed
+        KATA_INSTALLED=$(find "$HOME/.pyenv" /usr/local -name "kata" -path "*/bin/kata" -type f 2>/dev/null | head -1)
+        if [[ -n "$KATA_INSTALLED" ]] && [[ -f "$KATA_INSTALLED" ]]; then
+            cp "$KATA_INSTALLED" "$PYTHON_BIN_DIR/kata" 2>/dev/null && chmod +x "$PYTHON_BIN_DIR/kata" && \
+                info "Copied kata binary to $PYTHON_BIN_DIR"
+        fi
+    fi
+
+    # Create shim if using pyenv and shim doesn't exist
+    if [[ "$PYTHON_BIN_DIR" == *"pyenv"*"shims"* ]]; then
+        PYENV_ROOT=$(echo "$PYTHON_BIN_DIR" | sed 's|/shims.*|/|')
+        SHIMS_DIR="${PYENV_ROOT}shims"
+        if [[ ! -f "$SHIMS_DIR/kata" ]]; then
+            # Find the actual kata binary in pyenv versions
+            KATA_BIN=$(find "${PYENV_ROOT}versions" -name "kata" -path "*/bin/kata" -type f 2>/dev/null | head -1)
+            if [[ -n "$KATA_BIN" ]]; then
+                cat > "$SHIMS_DIR/kata" << 'SHIMEOF'
+#!/usr/bin/env bash
+set -e
+exec "KATA_BIN_PLACEHOLDER" "$@"
+SHIMEOF
+                sed -i '' "s|KATA_BIN_PLACEHOLDER|$KATA_BIN|" "$SHIMS_DIR/kata" 2>/dev/null || \
+                    sed -i "s|KATA_BIN_PLACEHOLDER|$KATA_BIN|" "$SHIMS_DIR/kata"
+                chmod +x "$SHIMS_DIR/kata"
+                info "Created kata shim at $SHIMS_DIR/kata"
+            fi
+        fi
     fi
 else
     error "Could not find kata source. Run this script from the kata directory."
