@@ -20,6 +20,9 @@ build/
 *.egg
 .eggs/
 
+# Generated version file
+kata/_version.py
+
 # Virtual environments
 .venv/
 venv/

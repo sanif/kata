@@ -48,6 +48,7 @@ class KataDashboard(App):
 
     TITLE = "▸ kata"
     SUB_TITLE = "workspace orchestrator"
+    ENABLE_COMMAND_PALETTE = False
 
     # Register custom Kata themes
     def __init__(self, *args, **kwargs):
