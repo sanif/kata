@@ -289,12 +289,54 @@ else
     exit 1
 fi
 
+# Ensure ~/.local/bin is in PATH
+ensure_path() {
+    local bin_dir="$HOME/.local/bin"
+
+    # Add to current session immediately
+    if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
+        export PATH="$bin_dir:$PATH"
+    fi
+
+    # Detect shell config file
+    local shell_config=""
+    if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
+        shell_config="$HOME/.zshrc"
+    elif [[ -n "$BASH_VERSION" ]] || [[ "$SHELL" == *"bash"* ]]; then
+        if [[ -f "$HOME/.bash_profile" ]]; then
+            shell_config="$HOME/.bash_profile"
+        else
+            shell_config="$HOME/.bashrc"
+        fi
+    fi
+
+    # Add to shell config if not already there
+    if [[ -n "$shell_config" ]]; then
+        local path_line='export PATH="$HOME/.local/bin:$PATH"'
+        if [[ -f "$shell_config" ]] && grep -q '\.local/bin' "$shell_config"; then
+            success "PATH already configured in $shell_config"
+        else
+            echo "" >> "$shell_config"
+            echo "# Added by kata installer" >> "$shell_config"
+            echo "$path_line" >> "$shell_config"
+            success "Added ~/.local/bin to PATH in $shell_config"
+        fi
+    fi
+}
+
 # Verify installation
+ensure_path
+
 if command -v kata &> /dev/null; then
     success "Kata is now available: $(which kata)"
 else
-    warn "Kata installed but not in PATH"
-    info "Add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    # Hash table refresh for current shell
+    hash -r 2>/dev/null || true
+    if command -v kata &> /dev/null; then
+        success "Kata is now available: $(which kata)"
+    else
+        warn "Kata installed but may need a new terminal session to be available"
+    fi
 fi
 
 echo ""
@@ -322,7 +364,12 @@ else
         echo "" >> "$TMUX_CONF"
         echo "$KATA_TMUX_MARKER" >> "$TMUX_CONF"
         echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> "$TMUX_CONF"
-        success "Tmux configured! Reload with: tmux source ~/.tmux.conf"
+        # Auto-reload tmux config if tmux is running
+        if [[ -n "$TMUX" ]]; then
+            tmux source-file "$TMUX_CONF" 2>/dev/null && success "Tmux config reloaded"
+        else
+            success "Tmux configured! Will apply on next tmux session"
+        fi
     else
         info "Skipped. You can add manually later."
     fi
