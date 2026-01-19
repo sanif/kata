@@ -28,25 +28,37 @@ echo ""
 info "Removing kata package..."
 pip3 uninstall kata -y 2>/dev/null && success "Removed kata package" || warn "kata package not found"
 
+# Detect pyenv root from PATH
+get_pyenv_roots() {
+    local roots=()
+    # From PATH's python location
+    local python_path
+    python_path=$(which python3 2>/dev/null)
+    if [[ "$python_path" == *"pyenv"* ]]; then
+        local pyenv_root
+        pyenv_root=$(echo "$python_path" | sed 's|/shims.*||')
+        roots+=("$pyenv_root")
+    fi
+    # Standard location
+    [[ -d "$HOME/.pyenv" ]] && roots+=("$HOME/.pyenv")
+    # Return unique roots
+    printf '%s\n' "${roots[@]}" | sort -u
+}
+
 # Remove shims from all pyenv locations
 info "Removing pyenv shims..."
-SHIM_LOCATIONS=(
-    "$HOME/.pyenv/shims/kata"
-    "/Users/$USER/.pyenv/shims/kata"
-    "/Volumes/External/Users/$USER/.pyenv/shims/kata"
-)
-
-for shim in "${SHIM_LOCATIONS[@]}"; do
+while IFS= read -r pyenv_root; do
+    shim="$pyenv_root/shims/kata"
     if [[ -f "$shim" ]]; then
         rm -f "$shim" && success "Removed $shim"
     fi
-done
+done < <(get_pyenv_roots)
 
 # Remove binaries from pyenv versions
 info "Removing kata binaries..."
-find "$HOME/.pyenv/versions" -name "kata" -path "*/bin/kata" -type f -delete 2>/dev/null || true
-find "/Users/$USER/.pyenv/versions" -name "kata" -path "*/bin/kata" -type f -delete 2>/dev/null || true
-find "/Volumes/External/Users/$USER/.pyenv/versions" -name "kata" -path "*/bin/kata" -type f -delete 2>/dev/null || true
+while IFS= read -r pyenv_root; do
+    find "$pyenv_root/versions" -name "kata" -path "*/bin/kata" -type f -delete 2>/dev/null || true
+done < <(get_pyenv_roots)
 
 # Remove from ~/.local/bin if exists
 if [[ -f "$HOME/.local/bin/kata" ]]; then
