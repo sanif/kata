@@ -363,14 +363,39 @@ ensure_path() {
 }
 
 # Verify installation and setup PATH
-ensure_path
 NEED_SHELL_RELOAD=false
+KATA_BIN=""
 
-# Check if kata is accessible
+# Find where kata was installed
 if command -v kata &> /dev/null; then
-    success "Kata is now available: $(which kata)"
+    KATA_BIN=$(which kata)
+    success "Kata is now available: $KATA_BIN"
+elif [[ -f "$HOME/.pyenv/shims/kata" ]]; then
+    KATA_BIN="$HOME/.pyenv/shims/kata"
+    # Ensure pyenv init is in shell profile
+    if command -v pyenv &> /dev/null; then
+        SHELL_RC=""
+        if [[ "$SHELL" == *"zsh"* ]]; then
+            SHELL_RC="$HOME/.zshrc"
+        elif [[ "$SHELL" == *"bash"* ]]; then
+            SHELL_RC="$HOME/.bashrc"
+            [[ -f "$HOME/.bash_profile" ]] && SHELL_RC="$HOME/.bash_profile"
+        fi
+        if [[ -n "$SHELL_RC" ]] && [[ -f "$SHELL_RC" ]]; then
+            if ! grep -q 'pyenv init' "$SHELL_RC"; then
+                echo "" >> "$SHELL_RC"
+                echo '# pyenv init (added by kata installer)' >> "$SHELL_RC"
+                echo 'eval "$(pyenv init -)"' >> "$SHELL_RC"
+                success "Added pyenv init to $SHELL_RC"
+                NEED_SHELL_RELOAD=true
+            fi
+        fi
+    fi
+    success "Kata installed at $KATA_BIN"
 elif [[ -f "$HOME/.local/bin/kata" ]]; then
-    success "Kata installed at ~/.local/bin/kata"
+    KATA_BIN="$HOME/.local/bin/kata"
+    ensure_path
+    success "Kata installed at $KATA_BIN"
     NEED_SHELL_RELOAD=true
 else
     warn "Kata binary not found - installation may have failed"
@@ -412,12 +437,12 @@ else
     fi
 fi
 
-# Enable return loop
+# Enable return loop (default: yes)
 echo ""
-read -p "Enable return loop (dashboard re-launches after detach)? [y/N] " -n 1 -r
+read -p "Enable return loop (dashboard re-launches after detach)? [Y/n] " -n 1 -r
 echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    kata loop enable 2>/dev/null || true
+if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    kata loop enable 2>/dev/null || "$HOME/.pyenv/shims/kata" loop enable 2>/dev/null || true
     success "Return loop enabled"
 fi
 
