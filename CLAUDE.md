@@ -130,3 +130,168 @@ bd create "Title" -t task -p 2 -l "label" -d "## Requirements
 
 **No exceptions.**
  If you don't have enough context for `-d`, ask the user first.
+
+
+## Git Workflow
+
+
+### CRITICAL: Main Branch Protection
+
+**NEVER make code changes directly on the `main` branch.**
+
+Before making ANY code changes, check the current branch:
+```bash
+git branch --show-current
+```
+
+If on `main`:
+1. **STOP** - Do not write any code
+2. **CREATE** a feature branch first:
+   ```bash
+   git checkout -b feature/<descriptive-name>
+   ```
+3. **THEN** proceed with code changes
+
+### Feature Branch Workflow
+
+All code changes MUST follow this workflow:
+
+1. **Create feature branch** from main:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout -b feature/<name>
+   ```
+
+2. **Make changes** on the feature branch
+
+3. **Commit** using Conventional Commits format (see below).
+
+4. **Push** and create PR:
+   ```bash
+   git push -u origin feature/<name>
+   ```
+
+### Branch Naming Convention
+
+- `feature/<name>` - New features
+- `fix/<name>` - Bug fixes
+- `hotfix/<name>` - Urgent production fixes
+- `chore/<name>` - Maintenance tasks
+
+
+## Commit Message Format (Conventional Commits)
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+### Format
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Type (required)
+
+| Type | Description | Version Bump |
+|------|-------------|--------------|
+| `feat` | New feature | MINOR |
+| `fix` | Bug fix | PATCH |
+| `docs` | Documentation only | - |
+| `style` | Formatting, no code change | - |
+| `refactor` | Code change, no feature/fix | - |
+| `perf` | Performance improvement | PATCH |
+| `test` | Adding/fixing tests | - |
+| `build` | Build system, dependencies | - |
+| `ci` | CI configuration | - |
+| `chore` | Maintenance tasks | - |
+
+### Scope (optional)
+
+Module or component affected: `feat(auth):`, `fix(api):`, `docs(readme):`
+
+### Subject (required)
+
+- Imperative mood: "add" not "added" or "adds"
+- Lowercase first letter
+- No period at end
+- Max 50 characters
+
+### Breaking Changes
+
+Add `!` after type/scope OR include `BREAKING CHANGE:` in footer:
+```
+feat(api)!: change response format
+
+BREAKING CHANGE: Response now uses JSON:API spec
+```
+
+### Examples
+
+```bash
+# Simple feature
+feat(auth): add OAuth2 login support
+
+# Bug fix
+fix(api): handle null response from external service
+
+# With body
+refactor(core): simplify state management
+
+- Remove redundant state updates
+- Consolidate event handlers
+- Improve type safety
+
+# Breaking change
+feat(api)!: change authentication to JWT
+
+BREAKING CHANGE: Bearer tokens now required for all endpoints.
+Migrate by adding Authorization header.
+
+# Multiple footers
+fix(payment): resolve currency conversion error
+
+Reviewed-by: John
+Refs: #123
+```
+
+### Multi-line Commits
+
+Use HEREDOC for multi-line messages:
+```bash
+git commit -m "$(cat <<'EOF'
+feat(dashboard): add analytics widget
+
+- Real-time data updates
+- Customizable date range
+- Export to CSV
+EOF
+)"
+```
+
+
+## Release Process
+
+Use the `/release` skill for commits and releases. It handles:
+- Conventional commit messages
+- Semantic versioning (MAJOR.MINOR.PATCH)
+- Git tagging and PyPI publishing
+
+### Version Bump Rules
+
+| Change type | Version bump | Example |
+|-------------|--------------|---------|
+| Breaking change (`!` or `BREAKING CHANGE`) | MAJOR | 1.0.0 → 2.0.0 |
+| New feature (`feat:`) | MINOR | 1.0.0 → 1.1.0 |
+| Bug fix, perf, etc. | PATCH | 1.0.0 → 1.0.1 |
+
+### Release Checklist
+
+Before releasing:
+- [ ] All changes committed
+- [ ] On `main` branch
+- [ ] Tests pass
+- [ ] Version bump type determined from commits

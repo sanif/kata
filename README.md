@@ -8,6 +8,10 @@ Kata is a powerful CLI and TUI tool that transforms how you manage development w
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
 
+<p align="center">
+  <img src="screenshots/dashboard.svg" alt="Kata Dashboard" width="800">
+</p>
+
 ---
 
 ## Why Kata?
@@ -453,6 +457,10 @@ Launch with `kata` (no arguments).
 
 Press `/` to activate search. Type to fuzzy-filter projects by name or group. Press `Escape` to clear and close search.
 
+<p align="center">
+  <img src="screenshots/search.svg" alt="Search Modal" width="700">
+</p>
+
 ### Context Menu
 
 Press `m` on any project to access:
@@ -464,6 +472,10 @@ Press `m` on any project to access:
 - **Save Layout** (`l`) - Capture current tmux layout to config
 - **Set Shortcut** (`s`) - Assign a quick-launch number (1-9)
 
+<p align="center">
+  <img src="screenshots/context_menu.svg" alt="Context Menu" width="700">
+</p>
+
 ### Settings
 
 Press `s` to configure:
@@ -471,6 +483,10 @@ Press `s` to configure:
 - **Default Group** - Group for new projects
 - **Refresh Interval** - Status update frequency (1-60 seconds)
 - **Theme** - Visual theme (kata-dark, kata-light, kata-ocean, kata-warm)
+
+<p align="center">
+  <img src="screenshots/settings.svg" alt="Settings Screen" width="700">
+</p>
 
 ---
 
