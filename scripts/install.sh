@@ -324,19 +324,18 @@ ensure_path() {
     fi
 }
 
-# Verify installation
+# Verify installation and setup PATH
 ensure_path
+NEED_SHELL_RELOAD=false
 
+# Check if kata is accessible
 if command -v kata &> /dev/null; then
     success "Kata is now available: $(which kata)"
+elif [[ -f "$HOME/.local/bin/kata" ]]; then
+    success "Kata installed at ~/.local/bin/kata"
+    NEED_SHELL_RELOAD=true
 else
-    # Hash table refresh for current shell
-    hash -r 2>/dev/null || true
-    if command -v kata &> /dev/null; then
-        success "Kata is now available: $(which kata)"
-    else
-        warn "Kata installed but may need a new terminal session to be available"
-    fi
+    warn "Kata binary not found - installation may have failed"
 fi
 
 echo ""
@@ -390,6 +389,15 @@ echo -e "${GREEN}═════════════════════
 echo -e "${GREEN}  Installation Complete!${NC}"
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 echo ""
+
+# Show reload instructions if needed
+if [[ "$NEED_SHELL_RELOAD" == true ]]; then
+    echo -e "${YELLOW}To use kata, reload your shell:${NC}"
+    echo ""
+    echo "  source ~/.zshrc    # or: exec \$SHELL"
+    echo ""
+fi
+
 echo "Quick start:"
 echo "  1. Add a project:     kata add ~/myproject"
 echo "  2. Open dashboard:    kata"
