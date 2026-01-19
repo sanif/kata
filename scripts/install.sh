@@ -327,19 +327,23 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
 
     # Create shim if using pyenv and shim doesn't exist
     if [[ "$PYTHON_BIN_DIR" == *"pyenv"*"shims"* ]]; then
-        PYENV_ROOT=$(echo "$PYTHON_BIN_DIR" | sed 's|/shims.*|/|')
-        SHIMS_DIR="${PYENV_ROOT}shims"
+        PYENV_ROOT=$(echo "$PYTHON_BIN_DIR" | sed 's|/shims.*||')
+        SHIMS_DIR="${PYENV_ROOT}/shims"
         if [[ ! -f "$SHIMS_DIR/kata" ]]; then
-            # Find the actual kata binary in pyenv versions
-            KATA_BIN=$(find "${PYENV_ROOT}versions" -name "kata" -path "*/bin/kata" -type f 2>/dev/null | head -1)
+            # Find kata binary - search multiple possible pyenv locations
+            KATA_BIN=""
+            for pyenv_loc in "${PYENV_ROOT}/versions" "$HOME/.pyenv/versions" "/Users/$USER/.pyenv/versions"; do
+                if [[ -d "$pyenv_loc" ]]; then
+                    KATA_BIN=$(find "$pyenv_loc" -name "kata" -path "*/bin/kata" -type f 2>/dev/null | head -1)
+                    [[ -n "$KATA_BIN" ]] && break
+                fi
+            done
             if [[ -n "$KATA_BIN" ]]; then
-                cat > "$SHIMS_DIR/kata" << 'SHIMEOF'
+                cat > "$SHIMS_DIR/kata" << SHIMEOF
 #!/usr/bin/env bash
 set -e
-exec "KATA_BIN_PLACEHOLDER" "$@"
+exec "$KATA_BIN" "\$@"
 SHIMEOF
-                sed -i '' "s|KATA_BIN_PLACEHOLDER|$KATA_BIN|" "$SHIMS_DIR/kata" 2>/dev/null || \
-                    sed -i "s|KATA_BIN_PLACEHOLDER|$KATA_BIN|" "$SHIMS_DIR/kata"
                 chmod +x "$SHIMS_DIR/kata"
                 info "Created kata shim at $SHIMS_DIR/kata"
             fi
