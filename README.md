@@ -69,7 +69,23 @@ pipx install kata-workspace --python python3.11
 pip install kata-workspace
 ```
 
-Then configure tmux (see [Configure Tmux](#configure-tmux) below).
+**Configure tmux keybinding** (Ctrl+Space for project switching):
+
+```bash
+# Add to ~/.tmux.conf
+echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> ~/.tmux.conf
+
+# Reload tmux config
+tmux source ~/.tmux.conf
+```
+
+**Set your editor** (add to `~/.zshrc` or `~/.bashrc`):
+
+```bash
+export EDITOR=nvim   # or: vim, code, nano
+```
+
+Now run `kata` to launch the dashboard!
 
 ### Install from Source
 
