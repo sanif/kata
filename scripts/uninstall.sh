@@ -24,9 +24,15 @@ echo -e "${RED}║     Kata Uninstall Script             ║${NC}"
 echo -e "${RED}╚═══════════════════════════════════════╝${NC}"
 echo ""
 
-# Uninstall via pip
+# Uninstall via pipx or pip
 info "Removing kata package..."
-pip3 uninstall kata -y 2>/dev/null && success "Removed kata package" || warn "kata package not found"
+if command -v pipx &> /dev/null && pipx list 2>/dev/null | grep -q kata; then
+    pipx uninstall kata 2>/dev/null && success "Removed kata (pipx)"
+elif pip3 uninstall kata -y 2>/dev/null; then
+    success "Removed kata package (pip)"
+else
+    warn "kata package not found in pipx or pip"
+fi
 
 # Detect pyenv root from PATH
 get_pyenv_roots() {
