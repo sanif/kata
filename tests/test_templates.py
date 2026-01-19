@@ -28,12 +28,10 @@ def project(tmp_path):
 
 
 @pytest.fixture
-def temp_configs_dir():
-    """Create a temporary configs directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("kata.core.templates.CONFIGS_DIR", Path(tmpdir)):
-            with patch("kata.core.templates.ensure_config_dirs"):
-                yield Path(tmpdir)
+def mock_config_dirs():
+    """Mock config dirs - configs are now stored in project directories."""
+    with patch("kata.core.config.ensure_config_dirs"):
+        yield
 
 
 class TestRenderTemplate:
@@ -80,18 +78,19 @@ class TestRenderTemplate:
 class TestWriteTemplate:
     """Tests for write_template function."""
 
-    def test_write_template(self, project, temp_configs_dir):
+    def test_write_template(self, project, mock_config_dirs):
         """Test writing template to disk."""
         config_path = write_template(project, ProjectType.PYTHON)
 
         assert config_path.exists()
-        assert config_path.name == "test-project.yaml"
+        assert config_path.name == ".kata.yaml"
+        assert config_path.parent == Path(project.path)
 
         content = config_path.read_text()
         config = yaml.safe_load(content)
         assert config["session_name"] == "test-project"
 
-    def test_write_template_creates_directory(self, project, temp_configs_dir):
+    def test_write_template_creates_directory(self, project, mock_config_dirs):
         """Test that write creates the configs directory."""
         config_path = write_template(project, ProjectType.PYTHON)
         assert config_path.parent.exists()
@@ -100,23 +99,23 @@ class TestWriteTemplate:
 class TestGetTemplatePath:
     """Tests for get_template_path function."""
 
-    def test_get_template_path(self, project, temp_configs_dir):
+    def test_get_template_path(self, project):
         """Test getting template path."""
         path = get_template_path(project)
 
-        assert path.name == "test-project.yaml"
-        assert path.parent == temp_configs_dir
+        assert path.name == ".kata.yaml"
+        assert path.parent == Path(project.path)
 
 
 class TestTemplateExists:
     """Tests for template_exists function."""
 
-    def test_template_exists_true(self, project, temp_configs_dir):
+    def test_template_exists_true(self, project, mock_config_dirs):
         """Test when template exists."""
         write_template(project, ProjectType.PYTHON)
         assert template_exists(project) is True
 
-    def test_template_exists_false(self, project, temp_configs_dir):
+    def test_template_exists_false(self, project):
         """Test when template doesn't exist."""
         assert template_exists(project) is False
 

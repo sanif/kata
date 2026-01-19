@@ -124,7 +124,8 @@ class TestLaunchSession:
 
     def test_launch_success(self, tmp_path):
         """Test successful session launch."""
-        config_file = tmp_path / "test.yaml"
+        # Config is now stored as .kata.yaml in the project directory
+        config_file = tmp_path / ".kata.yaml"
         config_file.write_text("session_name: test")
 
         project = Project(
@@ -134,7 +135,7 @@ class TestLaunchSession:
             config="test.yaml",
         )
 
-        with patch("kata.services.sessions.CONFIGS_DIR", tmp_path):
+        with patch("kata.services.sessions.migrate_project_config"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0)
                 launch_session(project)
@@ -149,13 +150,14 @@ class TestLaunchSession:
             config="nonexistent.yaml",
         )
 
-        with patch("kata.services.sessions.CONFIGS_DIR", tmp_path):
+        with patch("kata.services.sessions.migrate_project_config"):
             with pytest.raises(ConfigNotFoundError):
                 launch_session(project)
 
     def test_launch_tmuxp_error(self, tmp_path):
         """Test launch when tmuxp returns error."""
-        config_file = tmp_path / "test.yaml"
+        # Config is now stored as .kata.yaml in the project directory
+        config_file = tmp_path / ".kata.yaml"
         config_file.write_text("session_name: test")
 
         project = Project(
@@ -165,7 +167,7 @@ class TestLaunchSession:
             config="test.yaml",
         )
 
-        with patch("kata.services.sessions.CONFIGS_DIR", tmp_path):
+        with patch("kata.services.sessions.migrate_project_config"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=1, stderr="error")
                 with pytest.raises(SessionError):
@@ -190,24 +192,25 @@ class TestAttachSession:
         """Test attach when inside tmux (should switch-client)."""
         with patch("kata.services.sessions.session_exists", return_value=True):
             with patch("kata.services.sessions.is_inside_tmux", return_value=True):
-                with patch("kata.services.sessions._get_tmux_client", return_value=None):
-                    with patch("subprocess.run") as mock_run:
-                        attach_session("test-session")
-                        mock_run.assert_called_once()
-                        args = mock_run.call_args[0][0]
-                        assert "switch-client" in args
-
-    def test_attach_with_client_tty(self):
-        """Test attach with explicit client TTY (popup scenario)."""
-        with patch("kata.services.sessions.session_exists", return_value=True):
-            with patch("kata.services.sessions._get_tmux_client", return_value="/dev/ttys007"):
                 with patch("subprocess.run") as mock_run:
+                    mock_run.return_value.returncode = 0
                     attach_session("test-session")
                     mock_run.assert_called_once()
                     args = mock_run.call_args[0][0]
                     assert "switch-client" in args
-                    assert "-c" in args
-                    assert "/dev/ttys007" in args
+
+    def test_attach_inside_tmux_switch_client(self):
+        """Test attach inside tmux uses switch-client command."""
+        with patch("kata.services.sessions.session_exists", return_value=True):
+            with patch("kata.services.sessions.is_inside_tmux", return_value=True):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value.returncode = 0
+                    attach_session("test-session")
+                    mock_run.assert_called_once()
+                    args = mock_run.call_args[0][0]
+                    assert "switch-client" in args
+                    assert "-t" in args
+                    assert "test-session" in args
 
     def test_attach_session_not_found(self):
         """Test attach when session doesn't exist."""
@@ -254,7 +257,8 @@ class TestLaunchOrAttach:
 
     def test_launch_or_attach_new(self, tmp_path):
         """Test when session doesn't exist - should launch then attach."""
-        config_file = tmp_path / "test.yaml"
+        # Config is now stored as .kata.yaml in the project directory
+        config_file = tmp_path / ".kata.yaml"
         config_file.write_text("session_name: test")
 
         project = Project(
@@ -264,17 +268,17 @@ class TestLaunchOrAttach:
             config="test.yaml",
         )
 
-        with patch("kata.services.sessions.session_exists", return_value=False):
-            with patch("kata.services.sessions.CONFIGS_DIR", tmp_path):
-                with patch("subprocess.run") as mock_run:
-                    mock_run.return_value = MagicMock(returncode=0)
-                    with patch("kata.services.sessions.attach_session") as mock_attach:
-                        # After launch, session exists
-                        with patch(
-                            "kata.services.sessions.session_exists",
-                            side_effect=[False, True],
-                        ):
-                            launch_or_attach(project)
+        with patch("kata.services.sessions.migrate_project_config"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                with patch("kata.services.sessions.attach_session") as mock_attach:
+                    mock_attach.return_value = None
+                    # After launch, session exists
+                    with patch(
+                        "kata.services.sessions.session_exists",
+                        side_effect=[False, True],
+                    ):
+                        launch_or_attach(project)
 
 
 class TestGetAllKataSessions:
