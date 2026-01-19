@@ -33,6 +33,143 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     OS="linux"
 fi
 
+# Detect Linux package manager
+detect_pkg_manager() {
+    if command -v apt &> /dev/null; then
+        echo "apt"
+    elif command -v dnf &> /dev/null; then
+        echo "dnf"
+    elif command -v pacman &> /dev/null; then
+        echo "pacman"
+    elif command -v zypper &> /dev/null; then
+        echo "zypper"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get working pip command
+get_pip_cmd() {
+    # Try uv first (fastest, handles everything)
+    if command -v uv &> /dev/null; then
+        echo "uv pip"
+        return 0
+    fi
+    # Try pip3 (common on macOS/Linux)
+    if command -v pip3 &> /dev/null; then
+        echo "pip3"
+        return 0
+    fi
+    # Try pip
+    if command -v pip &> /dev/null; then
+        echo "pip"
+        return 0
+    fi
+    # Fallback to python3 -m pip
+    if command -v python3 &> /dev/null; then
+        echo "python3 -m pip"
+        return 0
+    fi
+    return 1
+}
+
+# Install system packages on macOS
+install_macos_deps() {
+    local deps=("$@")
+
+    # Check for Homebrew
+    if ! command -v brew &> /dev/null; then
+        warn "Homebrew is not installed"
+        info "Installing Homebrew (required for system dependencies)..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+        # Add brew to path for this session
+        if [[ -f "/opt/homebrew/bin/brew" ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [[ -f "/usr/local/bin/brew" ]]; then
+            eval "$(/usr/local/bin/brew shellenv)"
+        fi
+    fi
+
+    # Install each dependency
+    for dep in "${deps[@]}"; do
+        info "Installing $dep..."
+        brew install "$dep" 2>/dev/null || warn "Failed to install $dep via brew"
+    done
+}
+
+# Install system packages on Linux
+install_linux_deps() {
+    local deps=("$@")
+    local pkg_manager
+    pkg_manager=$(detect_pkg_manager)
+
+    # Map generic names to package names per distro
+    declare -A apt_names=( ["python3"]="python3" ["tmux"]="tmux" ["fzf"]="fzf" ["zoxide"]="zoxide" )
+    declare -A dnf_names=( ["python3"]="python3" ["tmux"]="tmux" ["fzf"]="fzf" ["zoxide"]="zoxide" )
+    declare -A pacman_names=( ["python3"]="python" ["tmux"]="tmux" ["fzf"]="fzf" ["zoxide"]="zoxide" )
+    declare -A zypper_names=( ["python3"]="python3" ["tmux"]="tmux" ["fzf"]="fzf" ["zoxide"]="zoxide" )
+
+    case "$pkg_manager" in
+        apt)
+            info "Updating apt cache..."
+            sudo apt update -qq
+            for dep in "${deps[@]}"; do
+                local pkg="${apt_names[$dep]:-$dep}"
+                info "Installing $pkg..."
+                sudo apt install -y "$pkg" 2>/dev/null || warn "Failed to install $pkg"
+            done
+            ;;
+        dnf)
+            for dep in "${deps[@]}"; do
+                local pkg="${dnf_names[$dep]:-$dep}"
+                info "Installing $pkg..."
+                sudo dnf install -y "$pkg" 2>/dev/null || warn "Failed to install $pkg"
+            done
+            ;;
+        pacman)
+            for dep in "${deps[@]}"; do
+                local pkg="${pacman_names[$dep]:-$dep}"
+                info "Installing $pkg..."
+                sudo pacman -S --noconfirm "$pkg" 2>/dev/null || warn "Failed to install $pkg"
+            done
+            ;;
+        zypper)
+            for dep in "${deps[@]}"; do
+                local pkg="${zypper_names[$dep]:-$dep}"
+                info "Installing $pkg..."
+                sudo zypper install -y "$pkg" 2>/dev/null || warn "Failed to install $pkg"
+            done
+            ;;
+        *)
+            error "Unknown package manager. Please install manually: ${deps[*]}"
+            return 1
+            ;;
+    esac
+}
+
+# Install tmuxp via pip
+install_tmuxp() {
+    local pip_cmd
+    pip_cmd=$(get_pip_cmd) || {
+        error "No pip available to install tmuxp"
+        return 1
+    }
+
+    info "Installing tmuxp via $pip_cmd..."
+    if [[ "$pip_cmd" == "uv pip" ]]; then
+        uv pip install tmuxp --quiet 2>/dev/null || {
+            warn "uv install failed, trying with --system flag..."
+            uv pip install --system tmuxp --quiet
+        }
+    else
+        $pip_cmd install tmuxp --quiet 2>/dev/null || {
+            warn "pip install failed, trying with --user flag..."
+            $pip_cmd install --user tmuxp --quiet
+        }
+    fi
+}
+
 # Check prerequisites
 info "Checking prerequisites..."
 
@@ -46,11 +183,13 @@ check_command() {
     fi
 }
 
-MISSING=()
+# Collect missing system dependencies (not tmuxp)
+MISSING_SYSTEM=()
+NEED_TMUXP=false
 
-check_command "python3" || MISSING+=("python3")
-check_command "tmux" || MISSING+=("tmux")
-check_command "fzf" || MISSING+=("fzf")
+check_command "python3" || MISSING_SYSTEM+=("python3")
+check_command "tmux" || MISSING_SYSTEM+=("tmux")
+check_command "fzf" || MISSING_SYSTEM+=("fzf")
 
 # Optional
 if ! check_command "zoxide"; then
@@ -58,36 +197,52 @@ if ! check_command "zoxide"; then
 fi
 
 if ! check_command "tmuxp"; then
-    MISSING+=("tmuxp")
+    NEED_TMUXP=true
 fi
 
-# Install missing dependencies
-if [ ${#MISSING[@]} -gt 0 ]; then
+# Install missing system dependencies
+if [ ${#MISSING_SYSTEM[@]} -gt 0 ]; then
     echo ""
-    warn "Missing dependencies: ${MISSING[*]}"
+    warn "Missing system dependencies: ${MISSING_SYSTEM[*]}"
 
     if [[ "$OS" == "macos" ]]; then
-        info "Install with: brew install ${MISSING[*]}"
-        read -p "Install now with Homebrew? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            for dep in "${MISSING[@]}"; do
-                if [[ "$dep" == "tmuxp" ]]; then
-                    pip install tmuxp
-                else
-                    brew install "$dep"
-                fi
-            done
-        else
-            error "Please install missing dependencies and re-run this script"
-            exit 1
-        fi
+        info "Installing via Homebrew..."
+        install_macos_deps "${MISSING_SYSTEM[@]}"
     elif [[ "$OS" == "linux" ]]; then
-        info "Install with your package manager:"
-        info "  sudo apt install tmux fzf python3-pip"
-        info "  pip install tmuxp"
-        error "Please install missing dependencies and re-run this script"
+        info "Installing via package manager..."
+        install_linux_deps "${MISSING_SYSTEM[@]}"
+    else
+        error "Unsupported OS. Please install manually: ${MISSING_SYSTEM[*]}"
         exit 1
+    fi
+
+    # Verify installation
+    echo ""
+    info "Verifying installations..."
+    STILL_MISSING=()
+    for dep in "${MISSING_SYSTEM[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            STILL_MISSING+=("$dep")
+        else
+            success "$dep installed successfully"
+        fi
+    done
+
+    if [ ${#STILL_MISSING[@]} -gt 0 ]; then
+        error "Failed to install: ${STILL_MISSING[*]}"
+        error "Please install these manually and re-run the script"
+        exit 1
+    fi
+fi
+
+# Install tmuxp if needed
+if [ "$NEED_TMUXP" = true ]; then
+    echo ""
+    install_tmuxp
+    if command -v tmuxp &> /dev/null; then
+        success "tmuxp installed successfully"
+    else
+        warn "tmuxp may not be in PATH yet. You may need to restart your shell."
     fi
 fi
 
@@ -102,13 +257,32 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
     # Installing from source
     cd "$KATA_DIR"
 
-    if command -v uv &> /dev/null; then
-        info "Installing with uv..."
-        uv pip install -e . --quiet
-    else
-        info "Installing with pip..."
-        pip install -e . --quiet
+    pip_cmd=$(get_pip_cmd) || {
+        error "No pip command found. Please install pip and re-run."
+        exit 1
+    }
+
+    info "Installing with $pip_cmd..."
+
+    install_kata() {
+        if [[ "$pip_cmd" == "uv pip" ]]; then
+            uv pip install . --quiet 2>/dev/null || uv pip install --system . --quiet
+        else
+            $pip_cmd install . --quiet 2>/dev/null || $pip_cmd install --user . --quiet
+        fi
+    }
+
+    # Try to install, upgrade pip if it fails
+    if ! install_kata 2>/dev/null; then
+        warn "Installation failed, trying to upgrade pip first..."
+        python3 -m pip install --upgrade pip --quiet 2>/dev/null || true
+
+        if ! install_kata; then
+            error "Failed to install kata. Please check your Python/pip setup."
+            exit 1
+        fi
     fi
+
     success "Kata installed from source"
 else
     error "Could not find kata source. Run this script from the kata directory."
