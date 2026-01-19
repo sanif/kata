@@ -85,6 +85,8 @@ tmux source ~/.tmux.conf
 export EDITOR=nvim   # or: vim, code, nano
 ```
 
+> **Note:** `$EDITOR` is used in default layouts to open your editor window and for `kata edit`.
+
 Now run `kata` to launch the dashboard!
 
 ### Install from Source
