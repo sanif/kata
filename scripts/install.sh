@@ -266,7 +266,8 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
 
     install_kata() {
         if [[ "$pip_cmd" == "uv pip" ]]; then
-            uv pip install . --quiet 2>/dev/null || uv pip install --system . --quiet
+            # Use --system to install globally, not into local .venv
+            uv pip install --system . --quiet
         else
             $pip_cmd install . --quiet 2>/dev/null || $pip_cmd install --user . --quiet
         fi
