@@ -332,7 +332,8 @@ if [ -f "$KATA_DIR/pyproject.toml" ]; then
         if [[ ! -f "$SHIMS_DIR/kata" ]]; then
             # Find kata binary - search multiple possible pyenv locations
             KATA_BIN=""
-            for pyenv_loc in "${PYENV_ROOT}/versions" "$HOME/.pyenv/versions"; do
+            # Search common pyenv locations (handles symlinked $HOME)
+            for pyenv_loc in "${PYENV_ROOT}/versions" "$HOME/.pyenv/versions" "/Users/$USER/.pyenv/versions"; do
                 if [[ -d "$pyenv_loc" ]]; then
                     KATA_BIN=$(find "$pyenv_loc" -name "kata" -path "*/bin/kata" -type f 2>/dev/null | head -1)
                     [[ -n "$KATA_BIN" ]] && break
