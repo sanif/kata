@@ -39,8 +39,9 @@ get_pyenv_roots() {
         pyenv_root=$(echo "$python_path" | sed 's|/shims.*||')
         roots+=("$pyenv_root")
     fi
-    # Standard location
+    # Standard locations (handles symlinked $HOME)
     [[ -d "$HOME/.pyenv" ]] && roots+=("$HOME/.pyenv")
+    [[ -d "/Users/$USER/.pyenv" ]] && roots+=("/Users/$USER/.pyenv")
     # Return unique roots
     printf '%s\n' "${roots[@]}" | sort -u
 }
