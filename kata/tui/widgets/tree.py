@@ -261,7 +261,9 @@ class ProjectTree(Widget):
 
         tree.clear()
 
+        # Reload registry from disk to pick up external changes (e.g., kata add)
         registry = get_registry()
+        registry.reload()
         projects = registry.list_all()
 
         # Get all session statuses in one batch call (more efficient)
