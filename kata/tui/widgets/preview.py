@@ -10,6 +10,7 @@ from kata.core.models import Project, SessionStatus
 from kata.core.templates import get_template_path
 from kata.services.sessions import get_session_status
 from kata.utils.detection import detect_project_type
+from kata.utils.paths import sanitize_session_name
 from kata.utils.git import get_git_status
 from kata.utils.zoxide import ZoxideEntry
 from kata.tui.widgets.layout import parse_tmuxp_config, render_layout_summary
@@ -93,7 +94,7 @@ class PreviewPane(Widget):
         project = self.project
 
         # Get status and type
-        status = get_session_status(project.name)
+        status = get_session_status(sanitize_session_name(project.name))
         project_type = detect_project_type(project.path)
 
         # Get git status

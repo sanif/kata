@@ -24,6 +24,7 @@ from kata.services.sessions import (
     save_current_session_layout,
     session_exists,
 )
+from kata.utils.paths import sanitize_session_name
 
 
 class MenuAction(Enum):
@@ -214,13 +215,14 @@ class ContextMenuScreen(ModalScreen[str | None]):
         if not confirmed:
             return
 
-        if not session_exists(self.project.name):
+        session_name = sanitize_session_name(self.project.name)
+        if not session_exists(session_name):
             self.app.notify("No active session to kill", severity="warning")
             self.dismiss(None)
             return
 
         try:
-            kill_session(self.project.name)
+            kill_session(session_name)
             self.app.notify(f"Killed session: {self.project.name}", title="Success")
             self.dismiss("killed")
         except SessionNotFoundError:
@@ -397,7 +399,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
     def action_save_layout(self) -> None:
         """Save the current session layout to the project's config."""
-        if not session_exists(self.project.name):
+        if not session_exists(sanitize_session_name(self.project.name)):
             self.app.notify(
                 "No active session to save",
                 severity="warning",
