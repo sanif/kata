@@ -1,7 +1,6 @@
 """CLI application for Kata."""
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -16,9 +15,7 @@ from kata.services.registry import (
 )
 from kata.services.sessions import (
     SessionError,
-    SessionNotFoundError,
     get_all_kata_sessions,
-    get_all_session_statuses,
     get_session_status,
     kill_session,
     launch_or_attach,
@@ -26,8 +23,8 @@ from kata.services.sessions import (
     session_exists,
 )
 from kata.utils.detection import detect_project_type
+from kata.utils.paths import PathValidationError, sanitize_session_name, validate_project_path
 from kata.utils.zoxide import is_zoxide_available, query_zoxide
-from kata.utils.paths import PathValidationError, validate_project_path, sanitize_session_name
 
 app = typer.Typer(
     name="kata",
@@ -49,7 +46,7 @@ def _status_indicator(status: str) -> str:
 
 @app.command()
 def add(
-    path: Optional[Path] = typer.Argument(
+    path: Path | None = typer.Argument(
         None,
         help="Path to the project directory (defaults to current directory)",
     ),
@@ -96,7 +93,7 @@ def add(
 
 @app.command("list")
 def list_projects(
-    group: Optional[str] = typer.Option(
+    group: str | None = typer.Option(
         None,
         "--group",
         "-g",
@@ -189,7 +186,7 @@ def launch(
 
 @app.command()
 def kill(
-    name: Optional[str] = typer.Argument(
+    name: str | None = typer.Argument(
         None,
         help="Name of the session to kill",
     ),
@@ -215,9 +212,7 @@ def kill(
     if all_sessions:
         # Get all sessions that correspond to registered projects
         registered_names = {p.name for p in registry.list_all()}
-        active_sessions = [
-            name for name in get_all_kata_sessions() if name in registered_names
-        ]
+        active_sessions = [name for name in get_all_kata_sessions() if name in registered_names]
 
         if not active_sessions:
             console.print("[dim]No active Kata sessions to kill.[/dim]")
@@ -275,7 +270,7 @@ def kill(
 
 @app.command()
 def scan(
-    path: Optional[Path] = typer.Argument(
+    path: Path | None = typer.Argument(
         None,
         help="Directory to scan (defaults to current directory)",
     ),
@@ -327,9 +322,7 @@ def scan(
             new_projects.append(project_path)
 
     if not new_projects:
-        console.print(
-            f"Found {len(discovered)} project(s), but all are already registered."
-        )
+        console.print(f"Found {len(discovered)} project(s), but all are already registered.")
         return
 
     console.print(f"\nFound [bold]{len(new_projects)}[/bold] new project(s):\n")
@@ -493,7 +486,7 @@ def routine(
         "run",
         help="Action: run, add, remove, list, clear",
     ),
-    target: Optional[str] = typer.Argument(
+    target: str | None = typer.Argument(
         None,
         help="Group or project name (for add/remove actions)",
     ),
@@ -534,7 +527,9 @@ def routine(
             console.print("Use [bold]kata routine add <group>[/bold] to add groups.")
             return
 
-        console.print(f"[bold]Starting morning routine ({len(routine_projects)} projects)...[/bold]\n")
+        console.print(
+            f"[bold]Starting morning routine ({len(routine_projects)} projects)...[/bold]\n"
+        )
 
         results = run_morning_routine()
 
@@ -554,7 +549,9 @@ def routine(
                 console.print(f"  [red]✗[/red] {result.project.name}: {result.error}")
                 failed += 1
 
-        console.print(f"\n[bold]Done![/bold] Launched: {launched}, Skipped: {skipped}, Failed: {failed}")
+        console.print(
+            f"\n[bold]Done![/bold] Launched: {launched}, Skipped: {skipped}, Failed: {failed}"
+        )
 
     elif action == "add":
         if not target:
@@ -591,7 +588,9 @@ def routine(
 
         if project:
             if remove_project_from_routine(target):
-                console.print(f"[green]✓[/green] Removed project [bold]{target}[/bold] from routine")
+                console.print(
+                    f"[green]✓[/green] Removed project [bold]{target}[/bold] from routine"
+                )
             else:
                 console.print(f"[dim]Not in routine:[/dim] {target}")
         else:
@@ -666,7 +665,9 @@ def loop(
         if enabled:
             console.print("\nThe dashboard will re-launch after you detach from a session.")
         else:
-            console.print("\nEnable with [bold]kata loop enable[/bold] to auto-relaunch after detach.")
+            console.print(
+                "\nEnable with [bold]kata loop enable[/bold] to auto-relaunch after detach."
+            )
 
     elif action == "enable":
         set_loop_enabled(True)
@@ -741,8 +742,8 @@ def _parse_switch_selection(selection: str) -> tuple[str, str]:
     import re
 
     # Strip ANSI codes (fzf-tmux may strip them, regular fzf keeps them)
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    clean = ansi_escape.sub('', selection).strip()
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    clean = ansi_escape.sub("", selection).strip()
 
     # Zoxide entries have format: "  name  /path/to/dir"
     # Registered projects have format: "  name"
@@ -794,7 +795,7 @@ def switch(
         "--list",
         help="Output items to stdout (for piping to fzf-tmux)",
     ),
-    select: Optional[str] = typer.Option(
+    select: str | None = typer.Option(
         None,
         "--select",
         help="Handle a selection from fzf-tmux (internal use)",
@@ -823,7 +824,7 @@ def switch(
             console.print(f"[red]Error:[/red] {e}")
             raise typer.Exit(1)
         except ProjectNotFoundError:
-            console.print(f"[red]Error:[/red] Project not found")
+            console.print("[red]Error:[/red] Project not found")
             raise typer.Exit(1)
         except SessionError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -870,7 +871,7 @@ def switch(
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
     except ProjectNotFoundError:
-        console.print(f"[red]Error:[/red] Project not found")
+        console.print("[red]Error:[/red] Project not found")
         raise typer.Exit(1)
     except SessionError as e:
         console.print(f"[red]Error:[/red] {e}")

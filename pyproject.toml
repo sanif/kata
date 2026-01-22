@@ -80,6 +80,8 @@ select = [
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
+    "B008",  # function call in default argument (common Typer pattern)
+    "B904",  # raise from within except (often not needed for CLI exit codes)
 ]
 
 [tool.ruff.lint.isort]

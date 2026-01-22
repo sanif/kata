@@ -6,12 +6,11 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Tree
-from textual.widgets.tree import TreeNode
 
 from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project, SessionStatus
 from kata.services.registry import get_registry
-from kata.services.sessions import get_all_session_statuses, get_session_status
+from kata.services.sessions import get_all_session_statuses
 from kata.utils.detection import detect_project_type
 from kata.utils.git import format_git_indicator_rich, get_git_status
 from kata.utils.zoxide import ZoxideEntry
@@ -159,7 +158,9 @@ class ProjectTree(Widget):
                 indicator = self._get_status_indicator(SessionStatus.IDLE)
 
                 project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                type_icon = PROJECT_TYPE_ICONS.get(
+                    project_type.value, PROJECT_TYPE_ICONS["generic"]
+                )
 
                 git_status = get_git_status(project.path)
                 git_indicator = format_git_indicator_rich(git_status)
@@ -221,7 +222,7 @@ class ProjectTree(Widget):
                 self._expanded_groups = set(data.get("expanded_groups", []))
             else:
                 self._expanded_groups = set()
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             self._expanded_groups = set()
 
     def _save_expanded_state(self) -> None:
@@ -233,7 +234,7 @@ class ProjectTree(Widget):
                 json.dumps(data, indent=2),
                 encoding="utf-8",
             )
-        except IOError:
+        except OSError:
             pass
 
     def _get_status_indicator(self, status: SessionStatus) -> str:
@@ -292,7 +293,9 @@ class ProjectTree(Widget):
 
                 # Get project type icon
                 project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                type_icon = PROJECT_TYPE_ICONS.get(
+                    project_type.value, PROJECT_TYPE_ICONS["generic"]
+                )
 
                 # Get git status for the project
                 git_status = get_git_status(project.path)
@@ -361,6 +364,7 @@ class ProjectTree(Widget):
                     self.post_message(self.ProjectHighlighted(project))
                     try:
                         from kata.tui.widgets.preview import PreviewPane
+
                         preview = self.app.query_one(PreviewPane)
                         preview.update_project(project)
                     except Exception:
@@ -371,6 +375,7 @@ class ProjectTree(Widget):
                     self.post_message(self.ZoxideHighlighted(entry))
                     try:
                         from kata.tui.widgets.preview import PreviewPane
+
                         preview = self.app.query_one(PreviewPane)
                         preview.update_zoxide(entry)
                     except Exception:
@@ -437,7 +442,9 @@ class ProjectTree(Widget):
                 indicator = self._get_status_indicator(status)
 
                 project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                type_icon = PROJECT_TYPE_ICONS.get(
+                    project_type.value, PROJECT_TYPE_ICONS["generic"]
+                )
 
                 git_status = get_git_status(project.path)
                 git_indicator = format_git_indicator_rich(git_status)

@@ -29,8 +29,8 @@ def run_with_loop() -> None:
 
     Press 'q' or Ctrl+C to fully exit.
     """
-    from kata.tui.app import KataDashboard
     from kata.services.sessions import launch_or_attach, launch_or_attach_adhoc
+    from kata.tui.app import KataDashboard
 
     print("\n[Kata Return Loop] Dashboard will re-launch after detach.")
     print("[Kata Return Loop] Press 'q' or Ctrl+C to exit completely.\n")

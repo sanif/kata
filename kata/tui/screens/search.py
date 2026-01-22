@@ -126,13 +126,15 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
 
         # Filter projects
         filtered_projects = [
-            p for p in sorted(self._projects, key=lambda p: p.name)
+            p
+            for p in sorted(self._projects, key=lambda p: p.name)
             if not query or self._fuzzy_match(query_lower, p.name.lower())
         ]
 
         # Filter zoxide entries
         filtered_zoxide = [
-            e for e in self._zoxide_entries
+            e
+            for e in self._zoxide_entries
             if not query or self._fuzzy_match(query_lower, e.name.lower())
         ]
 
@@ -145,9 +147,13 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
                 status = self._statuses.get(project.name, SessionStatus.IDLE)
                 indicator = self._get_status_indicator(status)
                 project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                type_icon = PROJECT_TYPE_ICONS.get(
+                    project_type.value, PROJECT_TYPE_ICONS["generic"]
+                )
 
-                label = f"  {indicator} {type_icon} {project.name}  [dim]{project.group.lower()}[/dim]"
+                label = (
+                    f"  {indicator} {type_icon} {project.name}  [dim]{project.group.lower()}[/dim]"
+                )
                 option_list.add_option(Option(label))
                 self._index_map[option_idx] = len(self._items)
                 self._items.append(project)
@@ -156,14 +162,20 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         # Add zoxide section
         if filtered_zoxide:
             if filtered_projects:
-                option_list.add_option(Option("[dim]─────────────────────────────────────────[/dim]", disabled=True))
+                option_list.add_option(
+                    Option("[dim]─────────────────────────────────────────[/dim]", disabled=True)
+                )
                 option_idx += 1
-            option_list.add_option(Option("[bold yellow]󰋚 Recent (not registered)[/bold yellow]", disabled=True))
+            option_list.add_option(
+                Option("[bold yellow]󰋚 Recent (not registered)[/bold yellow]", disabled=True)
+            )
             option_idx += 1
 
             for entry in filtered_zoxide:
                 project_type = detect_project_type(entry.path)
-                type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+                type_icon = PROJECT_TYPE_ICONS.get(
+                    project_type.value, PROJECT_TYPE_ICONS["generic"]
+                )
 
                 label = f"  [dim]◇[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
                 option_list.add_option(Option(label))

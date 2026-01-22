@@ -4,7 +4,6 @@ from pathlib import Path
 
 from kata.core.models import ProjectType
 
-
 # Project type markers in priority order
 PROJECT_MARKERS: dict[ProjectType, list[str]] = {
     ProjectType.PYTHON: ["pyproject.toml", "setup.py", "requirements.txt", "Pipfile"],

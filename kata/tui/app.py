@@ -10,7 +10,10 @@ from textual.widgets import Footer, Header, Static
 from kata.core.models import Project
 from kata.core.settings import get_settings, reload_settings
 from kata.services.registry import get_registry
-from kata.services.sessions import kill_session, launch_or_attach, launch_or_attach_adhoc, session_exists
+from kata.services.sessions import (
+    launch_or_attach,
+    launch_or_attach_adhoc,
+)
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
 from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
@@ -37,8 +40,7 @@ class EmptyState(Static):
     def compose(self) -> ComposeResult:
         """Compose empty state message."""
         yield Static(
-            "[dim]No projects registered yet.[/dim]\n\n"
-            "Use [bold]kata add[/bold] to add a project.",
+            "[dim]No projects registered yet.[/dim]\n\nUse [bold]kata add[/bold] to add a project.",
             markup=True,
         )
 
@@ -463,7 +465,9 @@ class KataDashboard(App):
             zoxide_entry = tree.get_selected_zoxide()
 
             if zoxide_entry:
-                self.push_screen(AddWizard(initial_path=zoxide_entry.path), self._on_wizard_complete)
+                self.push_screen(
+                    AddWizard(initial_path=zoxide_entry.path), self._on_wizard_complete
+                )
             else:
                 self.push_screen(AddWizard(), self._on_wizard_complete)
         except Exception:
@@ -482,9 +486,9 @@ class KataDashboard(App):
 
     def action_edit_project(self) -> None:
         """Edit the selected project's config."""
-        import subprocess
-        import shutil
         import os
+        import shutil
+        import subprocess
 
         try:
             tree = self.query_one(ProjectTree)
@@ -549,12 +553,11 @@ class KataDashboard(App):
         """Handle add request from recents panel."""
         self.push_screen(AddWizard(initial_path=event.entry.path), self._on_wizard_complete)
 
-    def on_project_tree_project_highlighted(
-        self, event: ProjectTree.ProjectHighlighted
-    ) -> None:
+    def on_project_tree_project_highlighted(self, event: ProjectTree.ProjectHighlighted) -> None:
         """Handle project highlight (cursor movement)."""
         preview = self.query_one(PreviewPane)
         preview.update_project(event.project)
+
 
 def run_dashboard() -> None:
     """Run the Kata dashboard."""
