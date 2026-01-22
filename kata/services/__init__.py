@@ -6,19 +6,6 @@ from kata.services.registry import (
     Registry,
     get_registry,
 )
-from kata.services.sessions import (
-    ConfigNotFoundError,
-    SessionError,
-    SessionNotFoundError,
-    attach_session,
-    get_all_kata_sessions,
-    get_session_status,
-    is_inside_tmux,
-    kill_session,
-    launch_or_attach,
-    launch_session,
-    session_exists,
-)
 from kata.services.routine import (
     LaunchResult,
     RoutineConfig,
@@ -33,6 +20,19 @@ from kata.services.routine import (
     remove_project_from_routine,
     run_morning_routine,
     save_routine,
+)
+from kata.services.sessions import (
+    ConfigNotFoundError,
+    SessionError,
+    SessionNotFoundError,
+    attach_session,
+    get_all_kata_sessions,
+    get_session_status,
+    is_inside_tmux,
+    kill_session,
+    launch_or_attach,
+    launch_session,
+    session_exists,
 )
 
 __all__ = [

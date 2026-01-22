@@ -3,11 +3,10 @@
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.message import Message
-from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, OptionList, Static, Switch
+from textual.widgets import Button, Input, OptionList, Static, Switch
 from textual.widgets.option_list import Option
 
 from kata.core.settings import (

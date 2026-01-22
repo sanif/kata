@@ -9,11 +9,11 @@ from textual.widgets import Static
 from kata.core.models import Project, SessionStatus
 from kata.core.templates import get_template_path
 from kata.services.sessions import get_session_status
-from kata.utils.detection import detect_project_type
-from kata.utils.paths import sanitize_session_name
-from kata.utils.git import get_git_status
-from kata.utils.zoxide import ZoxideEntry
 from kata.tui.widgets.layout import parse_tmuxp_config, render_layout_summary
+from kata.utils.detection import detect_project_type
+from kata.utils.git import get_git_status
+from kata.utils.paths import sanitize_session_name
+from kata.utils.zoxide import ZoxideEntry
 
 
 class PreviewPane(Widget):
@@ -101,7 +101,7 @@ class PreviewPane(Widget):
         git_status = get_git_status(project.path)
 
         # Format dates
-        created = self._format_date(project.created_at)
+        self._format_date(project.created_at)
         last_opened = self._format_date(project.last_opened) if project.last_opened else "Never"
 
         # Project type icons
@@ -288,7 +288,7 @@ class PreviewPane(Widget):
             "ruby": "󰴭",
             "generic": "󰉋",
         }
-        type_icon = type_icons.get(project_type.value, "󰉋")
+        type_icons.get(project_type.value, "󰉋")
 
         # Build content
         content = f"""[bold][yellow]󰉋[/yellow] {entry.name}[/bold]

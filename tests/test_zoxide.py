@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from kata.utils.zoxide import ZoxideEntry, is_zoxide_available, query_zoxide
 
 
@@ -133,7 +131,7 @@ class TestQueryZoxide:
         mock_result.returncode = 0
 
         with patch("kata.utils.zoxide.is_zoxide_available", return_value=True):
-            with patch("subprocess.run", return_value=mock_result) as mock_run:
+            with patch("subprocess.run", return_value=mock_result):
                 with patch("pathlib.Path.home", return_value=tmp_path):
                     mock_result.stdout = f"100.0 {tmp_path}\n50.0 {project_dir}\n"
                     result = query_zoxide()
