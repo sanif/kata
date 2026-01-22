@@ -43,6 +43,10 @@ class Registry:
         except (json.JSONDecodeError, KeyError):
             self._projects = {}
 
+    def reload(self) -> None:
+        """Reload registry from disk to pick up external changes."""
+        self._load()
+
     def _save(self) -> None:
         """Save registry to disk."""
         ensure_config_dirs()
