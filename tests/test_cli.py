@@ -3,13 +3,13 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from kata.cli.app import app
-from kata.core.models import Project, SessionStatus
+from kata.core.models import SessionStatus
 
 runner = CliRunner()
 
@@ -32,6 +32,7 @@ def mock_registry(temp_registry_file):
             with patch("kata.core.config.ensure_config_dirs"):
                 # Reset singleton
                 import kata.services.registry as reg_module
+
                 reg_module._registry = None
                 yield
 

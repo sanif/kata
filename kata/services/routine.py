@@ -2,12 +2,11 @@
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project
 from kata.services.registry import get_registry
-from kata.services.sessions import launch_session, session_exists, SessionError
+from kata.services.sessions import SessionError, launch_session, session_exists
 from kata.utils.paths import sanitize_session_name
 
 # Routine configuration file
@@ -50,7 +49,7 @@ def load_routine() -> RoutineConfig:
         with open(ROUTINE_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return RoutineConfig.from_dict(data)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return RoutineConfig()
 
 

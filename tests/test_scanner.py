@@ -1,7 +1,5 @@
 """Tests for directory scanner."""
 
-import pytest
-
 from kata.utils.scanner import (
     SKIP_DIRECTORIES,
     get_project_info,

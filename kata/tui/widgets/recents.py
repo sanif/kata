@@ -5,7 +5,7 @@ import os
 from textual.binding import Binding
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Static, OptionList
+from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from kata.services.registry import get_registry
@@ -162,7 +162,7 @@ class RecentsPanel(Widget, can_focus=True):
             # Shorten path for display (show ~/ for home)
             display_path = entry.path
             if display_path.startswith(home):
-                display_path = "~" + display_path[len(home):]
+                display_path = "~" + display_path[len(home) :]
 
             # Format: icon name path
             label = f"[yellow]{type_icon}[/yellow] {entry.name}  [dim]{display_path}[/dim]"
@@ -179,10 +179,7 @@ class RecentsPanel(Widget, can_focus=True):
             return
 
         query_lower = query.lower()
-        filtered = [
-            e for e in self._all_entries
-            if self._fuzzy_match(query_lower, e.name.lower())
-        ]
+        filtered = [e for e in self._all_entries if self._fuzzy_match(query_lower, e.name.lower())]
         self._render_entries(filtered)
 
     def _fuzzy_match(self, query: str, target: str) -> bool:
@@ -217,6 +214,7 @@ class RecentsPanel(Widget, can_focus=True):
             # Update preview pane
             try:
                 from kata.tui.widgets.preview import PreviewPane
+
                 preview = self.app.query_one(PreviewPane)
                 preview.update_zoxide(entry)
             except Exception:

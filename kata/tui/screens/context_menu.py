@@ -8,10 +8,8 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical
-from textual.message import Message
-from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, OptionList, Static
+from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from kata.core.models import Project
@@ -19,7 +17,6 @@ from kata.services.registry import get_registry
 from kata.services.sessions import (
     SessionError,
     SessionNotFoundError,
-    get_session_status,
     kill_session,
     save_current_session_layout,
     session_exists,
@@ -355,23 +352,23 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
         if iterm_check.returncode == 0:
             # Use iTerm2
-            script = f'''
+            script = f"""
             tell application "iTerm"
                 create window with default profile
                 tell current session of current window
                     write text "cd {path}"
                 end tell
             end tell
-            '''
+            """
             subprocess.run(["osascript", "-e", script], check=True)
         else:
             # Fall back to Terminal.app
-            script = f'''
+            script = f"""
             tell application "Terminal"
                 do script "cd {path}"
                 activate
             end tell
-            '''
+            """
             subprocess.run(["osascript", "-e", script], check=True)
 
     def _open_linux_terminal(self, path: str) -> None:
@@ -815,7 +812,7 @@ class ShortcutSelectorDialog(ModalScreen[int | None]):
         """Compose the dialog."""
         with Container(id="dialog-container"):
             yield Static("Set Shortcut", id="dialog-title")
-            yield Static(f"[dim]Press 1-9 or select below[/dim]", id="dialog-subtitle")
+            yield Static("[dim]Press 1-9 or select below[/dim]", id="dialog-subtitle")
 
             options = []
             for i in range(1, 10):

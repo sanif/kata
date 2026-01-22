@@ -76,11 +76,7 @@ def parse_tmuxp_config(config_path: Path) -> LayoutInfo | None:
                     if isinstance(pane_data, dict):
                         shell_cmd = pane_data.get("shell_command", [])
                         if isinstance(shell_cmd, list):
-                            commands = [
-                                c
-                                for c in shell_cmd
-                                if c and not c.strip().startswith("#")
-                            ]
+                            commands = [c for c in shell_cmd if c and not c.strip().startswith("#")]
                         elif isinstance(shell_cmd, str):
                             if not shell_cmd.strip().startswith("#"):
                                 commands = [shell_cmd]
@@ -94,9 +90,7 @@ def parse_tmuxp_config(config_path: Path) -> LayoutInfo | None:
             if not panes:
                 panes.append(PaneInfo(commands=[]))
 
-            windows.append(
-                WindowInfo(name=window_name, panes=panes, layout=window_layout)
-            )
+            windows.append(WindowInfo(name=window_name, panes=panes, layout=window_layout))
 
         return LayoutInfo(
             session_name=session_name,
@@ -104,7 +98,7 @@ def parse_tmuxp_config(config_path: Path) -> LayoutInfo | None:
             start_directory=start_directory,
         )
 
-    except (yaml.YAMLError, IOError, KeyError):
+    except (OSError, yaml.YAMLError, KeyError):
         return None
 
 
@@ -148,9 +142,7 @@ def render_window_diagram(window: WindowInfo, width: int = 30) -> list[str]:
 
         if window.layout in ("main-vertical", "even-horizontal"):
             # Side by side
-            lines.append(
-                "│ " + p1_cmd.ljust(half_width) + "│" + p2_cmd.ljust(half_width) + " │"
-            )
+            lines.append("│ " + p1_cmd.ljust(half_width) + "│" + p2_cmd.ljust(half_width) + " │")
         else:
             # Stacked
             lines.append("│ " + p1_cmd.ljust(inner_width - 2) + " │")
