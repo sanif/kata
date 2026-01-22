@@ -39,9 +39,7 @@ class Registry:
 
         try:
             data = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
-            self._projects = {
-                p["name"]: Project.from_dict(p) for p in data.get("projects", [])
-            }
+            self._projects = {p["name"]: Project.from_dict(p) for p in data.get("projects", [])}
         except (json.JSONDecodeError, KeyError):
             self._projects = {}
 
@@ -54,9 +52,7 @@ class Registry:
             "projects": [p.to_dict() for p in self._projects.values()],
         }
 
-        REGISTRY_FILE.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def add(self, project: Project) -> None:
         """Add a project to the registry.
@@ -72,9 +68,7 @@ class Registry:
         # Check for duplicate path
         for existing in self._projects.values():
             if normalize_path(existing.path) == normalized_path:
-                raise DuplicatePathError(
-                    f"Project already exists at path: {normalized_path}"
-                )
+                raise DuplicatePathError(f"Project already exists at path: {normalized_path}")
 
         # Handle name collisions by appending a suffix
         base_name = project.name
@@ -162,7 +156,7 @@ class Registry:
         Returns:
             List of group names
         """
-        return sorted(set(p.group for p in self._projects.values()))
+        return sorted({p.group for p in self._projects.values()})
 
     def find_by_path(self, path: str | Path) -> Project | None:
         """Find a project by its path.

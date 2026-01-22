@@ -1,7 +1,5 @@
 """Tests for project type detection."""
 
-import pytest
-
 from kata.core.models import ProjectType
 from kata.utils.detection import (
     PROJECT_MARKERS,
@@ -108,6 +106,6 @@ class TestProjectMarkers:
 
     def test_markers_are_strings(self):
         """Test that all markers are strings."""
-        for project_type, markers in PROJECT_MARKERS.items():
+        for _project_type, markers in PROJECT_MARKERS.items():
             for marker in markers:
                 assert isinstance(marker, str)

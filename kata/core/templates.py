@@ -208,7 +208,11 @@ def _standard_windows(project_type: ProjectType) -> list[dict[str, Any]]:
         {
             "window_name": "tests",
             "panes": [
-                {"shell_command": env_activation + test_commands if env_activation else test_commands}
+                {
+                    "shell_command": env_activation + test_commands
+                    if env_activation
+                    else test_commands
+                }
             ],
         },
     ]
@@ -238,13 +242,21 @@ def _full_windows(project_type: ProjectType) -> list[dict[str, Any]]:
         {
             "window_name": "tests",
             "panes": [
-                {"shell_command": env_activation + test_commands if env_activation else test_commands}
+                {
+                    "shell_command": env_activation + test_commands
+                    if env_activation
+                    else test_commands
+                }
             ],
         },
         {
             "window_name": "build",
             "panes": [
-                {"shell_command": env_activation + build_commands if env_activation else build_commands}
+                {
+                    "shell_command": env_activation + build_commands
+                    if env_activation
+                    else build_commands
+                }
             ],
         },
         {

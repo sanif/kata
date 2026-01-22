@@ -1,12 +1,18 @@
 """Session service for managing tmux sessions."""
 
+from __future__ import annotations
+
 import os
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from kata.core.config import get_project_config_path, migrate_project_config
 from kata.core.models import Project, SessionStatus
 from kata.utils.paths import sanitize_session_name
+
+if TYPE_CHECKING:
+    import libtmux
 
 
 class SessionError(Exception):
@@ -27,7 +33,7 @@ class ConfigNotFoundError(SessionError):
     pass
 
 
-def _get_tmux_server() -> "libtmux.Server | None":
+def _get_tmux_server() -> libtmux.Server | None:
     """Get libtmux Server instance if tmux is running.
 
     Note: libtmux may not work inside Textual TUI due to stdout/stderr
@@ -595,7 +601,15 @@ def get_session_layout(session_name: str) -> dict | None:
 
                         # Skip shells, use actual command
                         shell_cmd = []
-                        if cmd and cmd not in ("zsh", "bash", "sh", "fish", "-zsh", "-bash", "-fish"):
+                        if cmd and cmd not in (
+                            "zsh",
+                            "bash",
+                            "sh",
+                            "fish",
+                            "-zsh",
+                            "-bash",
+                            "-fish",
+                        ):
                             shell_cmd = [cmd]
 
                         pane_entry: dict[str, Any] = {"shell_command": shell_cmd}

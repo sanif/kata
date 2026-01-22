@@ -1,7 +1,6 @@
 """Add Project Wizard screen for TUI."""
 
 from pathlib import Path
-from typing import Callable
 
 from textual import on
 from textual.app import ComposeResult
@@ -10,7 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, DirectoryTree, Input, Label, OptionList, Static
+from textual.widgets import Button, DirectoryTree, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from kata.core.models import Project, ProjectType
@@ -78,9 +77,7 @@ class PathStep(WizardStep):
         )
         yield Input(placeholder="Enter path or browse below...", id="path-input")
         yield DirectoryTree(str(Path.home()), id="path-tree")
-        yield Static(
-            "Press Enter to select the highlighted directory", classes="path-hint"
-        )
+        yield Static("Press Enter to select the highlighted directory", classes="path-hint")
 
     def on_mount(self) -> None:
         """Set initial path to current directory."""
@@ -519,7 +516,7 @@ class AddWizard(ModalScreen):
         # Show/hide steps and focus active step
         step_classes = [PathStep, GroupStep, TemplateStep, LayoutStep]
         step_ids = ["#path-step", "#group-step", "#template-step", "#layout-step"]
-        for i, (step_id, step_class) in enumerate(zip(step_ids, step_classes), 1):
+        for i, (step_id, step_class) in enumerate(zip(step_ids, step_classes, strict=False), 1):
             try:
                 step_widget = self.query_one(step_id, step_class)
                 step_widget.display = i == step
