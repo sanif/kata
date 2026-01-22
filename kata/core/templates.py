@@ -8,6 +8,7 @@ import yaml
 
 from kata.core.config import ensure_config_dirs, get_project_config_path
 from kata.core.models import Project, ProjectType
+from kata.utils.paths import sanitize_session_name
 
 
 class LayoutPreset(Enum):
@@ -23,7 +24,7 @@ class LayoutPreset(Enum):
 def _base_template(name: str, path: str) -> dict[str, Any]:
     """Create base template structure."""
     return {
-        "session_name": name,
+        "session_name": sanitize_session_name(name),
         "start_directory": path,
         "windows": [],
     }

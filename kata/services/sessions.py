@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kata.core.config import get_project_config_path, migrate_project_config
 from kata.core.models import Project, SessionStatus
+from kata.utils.paths import sanitize_session_name
 
 
 class SessionError(Exception):
@@ -262,14 +263,15 @@ def launch_or_attach(project: Project) -> None:
     """
     import time
 
-    if session_exists(project.name):
-        attach_session(project.name)
+    session_name = sanitize_session_name(project.name)
+    if session_exists(session_name):
+        attach_session(session_name)
     else:
         launch_session(project)
         # Wait for session to be ready (tmuxp may take a moment)
         session_ready = False
         for _ in range(20):
-            if session_exists(project.name):
+            if session_exists(session_name):
                 session_ready = True
                 break
             time.sleep(0.1)
@@ -277,7 +279,7 @@ def launch_or_attach(project: Project) -> None:
         if not session_ready:
             raise SessionError(f"Session '{project.name}' failed to start within timeout")
 
-        attach_session(project.name)
+        attach_session(session_name)
 
 
 def _generate_unique_session_name(base_name: str) -> str:
@@ -647,11 +649,12 @@ def save_current_session_layout(project: Project) -> Path:
 
     from kata.core.templates import _base_template
 
-    if not session_exists(project.name):
+    session_name = sanitize_session_name(project.name)
+    if not session_exists(session_name):
         raise SessionError(f"Session not found: {project.name}")
 
     # Capture current layout
-    layout = get_session_layout(project.name)
+    layout = get_session_layout(session_name)
     if layout is None:
         raise SessionError("Failed to capture session layout")
 

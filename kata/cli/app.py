@@ -27,7 +27,7 @@ from kata.services.sessions import (
 )
 from kata.utils.detection import detect_project_type
 from kata.utils.zoxide import is_zoxide_available, query_zoxide
-from kata.utils.paths import PathValidationError, validate_project_path
+from kata.utils.paths import PathValidationError, validate_project_path, sanitize_session_name
 
 app = typer.Typer(
     name="kata",
@@ -123,7 +123,7 @@ def list_projects(
     table.add_column("Path", style="dim")
 
     for project in sorted(projects, key=lambda p: (p.group, p.name)):
-        status = get_session_status(project.name)
+        status = get_session_status(sanitize_session_name(project.name))
         table.add_row(
             _status_indicator(status.value),
             project.name,
@@ -253,7 +253,9 @@ def kill(
         if name not in registry:
             console.print(f"[yellow]Warning:[/yellow] '{name}' is not a registered project")
 
-        if not session_exists(name):
+        # Sanitize session name in case user passed project name with special chars
+        sanitized_name = sanitize_session_name(name)
+        if not session_exists(sanitized_name):
             console.print(f"[red]Error:[/red] No active session found: {name}")
             raise typer.Exit(1)
 
@@ -264,7 +266,7 @@ def kill(
                 raise typer.Exit(0)
 
         try:
-            kill_session(name)
+            kill_session(sanitized_name)
             console.print(f"[green]✓[/green] Killed session: [bold]{name}[/bold]")
         except SessionError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -891,7 +893,7 @@ def switch_preview(
         raise typer.Exit(1)
 
     # Get session status
-    status = get_session_status(project.name)
+    status = get_session_status(sanitize_session_name(project.name))
     status_display = {
         "active": "[green]Active[/green]",
         "detached": "[yellow]Detached[/yellow]",

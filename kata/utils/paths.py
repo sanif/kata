@@ -54,3 +54,19 @@ def get_project_name_from_path(path: str | Path) -> str:
         Directory name as project name
     """
     return Path(path).expanduser().resolve().name
+
+
+def sanitize_session_name(name: str) -> str:
+    """Sanitize a name for use as a tmux session name.
+
+    tmux session names cannot contain periods or colons.
+    This replaces invalid characters with underscores.
+
+    Args:
+        name: The name to sanitize
+
+    Returns:
+        A valid tmux session name
+    """
+    # tmux doesn't allow periods or colons in session names
+    return name.replace(".", "_").replace(":", "_")

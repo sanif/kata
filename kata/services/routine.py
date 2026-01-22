@@ -8,6 +8,7 @@ from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project
 from kata.services.registry import get_registry
 from kata.services.sessions import launch_session, session_exists, SessionError
+from kata.utils.paths import sanitize_session_name
 
 # Routine configuration file
 ROUTINE_FILE = KATA_CONFIG_DIR / "routine.json"
@@ -216,7 +217,7 @@ def _launch_project_background(project: Project) -> LaunchResult:
         LaunchResult with status
     """
     # Skip if already running
-    if session_exists(project.name):
+    if session_exists(sanitize_session_name(project.name)):
         return LaunchResult(project=project, success=True, skipped=True)
 
     try:
