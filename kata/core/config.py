@@ -15,6 +15,11 @@ KATA_CONFIG_FILENAME = ".kata.yaml"
 # Legacy configs directory (for migration)
 LEGACY_CONFIGS_DIR = KATA_CONFIG_DIR / "configs"
 
+# Notification system paths
+NOTIFICATIONS_DB = KATA_CONFIG_DIR / "notifications.db"
+NOTIFYD_SOCKET = KATA_CONFIG_DIR / "notifyd.sock"
+NOTIFYD_PID_FILE = KATA_CONFIG_DIR / "notifyd.pid"
+
 
 def ensure_config_dirs() -> None:
     """Create configuration directories if they don't exist."""
