@@ -35,6 +35,17 @@ class Settings:
     refresh_interval: int = 5
     theme: str = "kata-dark"
 
+    # Notification settings
+    notifications_enabled: bool = True
+    notifications_os_enabled: bool = True
+    notifications_sound: str = "Glass"
+    notifications_retention_days: int = 7
+    notifications_max_count: int = 500
+    notifications_claude_code_hooks: bool = True
+    notifications_tmux_hooks: bool = True
+    notifications_suppression_seconds: int = 5
+    notifications_terminal_app: str = "auto"
+
     def __post_init__(self) -> None:
         """Validate and clamp values."""
         # Clamp refresh_interval to valid range (1-60)
@@ -43,6 +54,13 @@ class Settings:
         # Validate theme (allow legacy themes to fall back to kata-dark)
         if self.theme not in AVAILABLE_THEMES:
             self.theme = "kata-dark"
+
+        # Clamp notification settings
+        self.notifications_retention_days = max(1, min(365, self.notifications_retention_days))
+        self.notifications_max_count = max(10, min(10000, self.notifications_max_count))
+        self.notifications_suppression_seconds = max(
+            0, min(300, self.notifications_suppression_seconds)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize settings to dictionary."""
@@ -56,6 +74,15 @@ class Settings:
             default_group=data.get("default_group", "Uncategorized"),
             refresh_interval=data.get("refresh_interval", 5),
             theme=data.get("theme", "default"),
+            notifications_enabled=data.get("notifications_enabled", True),
+            notifications_os_enabled=data.get("notifications_os_enabled", True),
+            notifications_sound=data.get("notifications_sound", "Glass"),
+            notifications_retention_days=data.get("notifications_retention_days", 7),
+            notifications_max_count=data.get("notifications_max_count", 500),
+            notifications_claude_code_hooks=data.get("notifications_claude_code_hooks", True),
+            notifications_tmux_hooks=data.get("notifications_tmux_hooks", True),
+            notifications_suppression_seconds=data.get("notifications_suppression_seconds", 5),
+            notifications_terminal_app=data.get("notifications_terminal_app", "auto"),
         )
 
 
