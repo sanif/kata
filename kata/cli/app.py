@@ -952,6 +952,156 @@ def migrate() -> None:
     console.print(f"\n[bold]Done![/bold] Migrated: {migrated}, Skipped: {skipped}")
 
 
+# --- Notification daemon commands ---
+
+
+@app.command("notifyd-start")
+def notifyd_start() -> None:
+    """Start the notification daemon in the background."""
+    from kata.services.notifications.daemon import is_daemon_running, run_daemon
+
+    if is_daemon_running():
+        console.print("[yellow]Notification daemon is already running.[/yellow]")
+        return
+
+    import multiprocessing
+
+    p = multiprocessing.Process(target=run_daemon, daemon=True)
+    p.start()
+    console.print(f"[green]✓[/green] Notification daemon started (PID: {p.pid})")
+
+
+@app.command("notifyd-stop")
+def notifyd_stop() -> None:
+    """Stop the notification daemon."""
+    from kata.services.notifications.daemon import is_daemon_running, stop_daemon
+
+    if not is_daemon_running():
+        console.print("[dim]Notification daemon is not running.[/dim]")
+        return
+
+    if stop_daemon():
+        console.print("[green]✓[/green] Notification daemon stopped.")
+    else:
+        console.print("[red]Failed to stop daemon.[/red]")
+
+
+@app.command("notifyd-status")
+def notifyd_status() -> None:
+    """Check notification daemon status."""
+    from kata.services.notifications.daemon import is_daemon_running
+
+    if is_daemon_running():
+        console.print("[green]●[/green] Notification daemon is running.")
+    else:
+        console.print("[dim]●[/dim] Notification daemon is not running.")
+
+
+# --- Notification management commands ---
+
+
+@app.command("notifications")
+def notifications_cmd(
+    action: str = typer.Argument("list", help="list, unread, clear, dismiss-all"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max notifications to show"),
+) -> None:
+    """View and manage notifications."""
+    from kata.services.notifications.models import NotificationStatus
+    from kata.services.notifications.store import get_notification_store
+
+    store = get_notification_store()
+
+    if action == "list":
+        notifications = store.list_all(limit=limit)
+        if not notifications:
+            console.print("[dim]No notifications.[/dim]")
+            return
+
+        type_icons = {
+            "task_complete": "✅",
+            "question": "❓",
+            "plan_ready": "📋",
+            "review_done": "🔍",
+            "error": "❌",
+            "session_limit": "⏱️",
+            "session_launched": "🚀",
+            "session_detached": "💤",
+            "session_attached": "👋",
+            "session_killed": "💀",
+            "routine_complete": "☀️",
+        }
+
+        table = Table(title="Notifications", show_lines=False)
+        table.add_column("", width=2)
+        table.add_column("Time", style="dim", width=16)
+        table.add_column("Title", min_width=20)
+        table.add_column("Session", style="cyan", width=15)
+        table.add_column("Status", width=8)
+
+        for n in notifications:
+            icon = type_icons.get(n.type.value, "🔔")
+            time_str = n.timestamp.strftime("%m-%d %H:%M")
+            status_str = (
+                "[bold]● NEW[/bold]" if n.status == NotificationStatus.UNREAD else "[dim]○[/dim]"
+            )
+            table.add_row(icon, time_str, n.title, n.session_name or "", status_str)
+
+        console.print(table)
+        unread = store.unread_count()
+        if unread > 0:
+            console.print(f"\n[bold]{unread}[/bold] unread")
+
+    elif action == "unread":
+        notifications = store.list_by_status(NotificationStatus.UNREAD)
+        if not notifications:
+            console.print("[dim]No unread notifications.[/dim]")
+            return
+        for n in notifications:
+            console.print(f"  [{n.type.value}] {n.title} ({n.session_name})")
+
+    elif action in ("clear", "dismiss-all"):
+        store.dismiss_all()
+        console.print("[green]✓[/green] All notifications dismissed.")
+
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        raise typer.Exit(1)
+
+
+# --- Hook handler commands (called by Claude Code / tmux) ---
+
+
+@app.command("notify-claude-stop", hidden=True)
+def notify_claude_stop() -> None:
+    """Handle Claude Code Stop/SubagentStop hook. Reads JSON from stdin."""
+    import sys
+
+    from kata.services.notifications.hooks.claude_code import handle_claude_stop
+
+    stdin_data = sys.stdin.read()
+    handle_claude_stop(stdin_data)
+
+
+@app.command("notify-tmux-event", hidden=True)
+def notify_tmux_event(
+    event_type: str = typer.Argument(..., help="detached or attached"),
+    session: str = typer.Option(..., "--session", "-s", help="Session name"),
+) -> None:
+    """Handle tmux hook events."""
+    from kata.services.notifications.hooks.tmux import handle_tmux_event
+
+    handle_tmux_event(event_type, session)
+
+
+@app.command("notify-setup")
+def notify_setup() -> None:
+    """Set up Claude Code hooks for Kata notifications."""
+    from kata.services.notifications.hooks.claude_code import setup_hooks
+
+    setup_hooks()
+    console.print("[green]✓[/green] Claude Code hooks configured for Kata notifications.")
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Kata - Terminal-centric workspace orchestrator for tmux.
