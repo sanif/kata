@@ -263,6 +263,23 @@ def run_morning_routine() -> list[LaunchResult]:
         result = _launch_project_background(project)
         results.append(result)
 
+    # Notify: routine complete
+    try:
+        from kata.services.notifications import notify
+        from kata.services.notifications.models import NotificationSource, NotificationType
+
+        success_count = sum(1 for r in results if r.success)
+        total = len(results)
+        notify(
+            type=NotificationType.ROUTINE_COMPLETE,
+            source=NotificationSource.KATA,
+            title="Morning Routine Complete",
+            body=f"Launched {success_count}/{total} projects",
+            priority=2,
+        )
+    except Exception:
+        pass
+
     return results
 
 

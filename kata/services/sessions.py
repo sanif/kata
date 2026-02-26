@@ -178,6 +178,22 @@ def launch_session(project: Project) -> None:
     except FileNotFoundError:
         raise SessionError("tmuxp not found. Please install tmuxp.")
 
+    # Notify: session launched
+    try:
+        from kata.services.notifications import notify
+        from kata.services.notifications.hooks.tmux import register_tmux_hooks
+        from kata.services.notifications.models import NotificationSource, NotificationType
+
+        notify(
+            type=NotificationType.SESSION_LAUNCHED,
+            source=NotificationSource.KATA,
+            title=f"Session launched: {project.name}",
+            session_name=sanitize_session_name(project.name),
+        )
+        register_tmux_hooks(sanitize_session_name(project.name))
+    except Exception:
+        pass  # Notification failure should never block session launch
+
 
 def _get_tmux_client() -> str | None:
     """Get the current tmux client TTY.
@@ -256,6 +272,22 @@ def kill_session(session_name: str) -> None:
         )
     except subprocess.CalledProcessError as e:
         raise SessionError(f"Failed to kill session: {e}")
+
+    # Notify: session killed
+    try:
+        from kata.services.notifications import notify
+        from kata.services.notifications.hooks.tmux import unregister_tmux_hooks
+        from kata.services.notifications.models import NotificationSource, NotificationType
+
+        unregister_tmux_hooks(session_name)
+        notify(
+            type=NotificationType.SESSION_KILLED,
+            source=NotificationSource.KATA,
+            title=f"Session killed: {session_name}",
+            session_name=session_name,
+        )
+    except Exception:
+        pass
 
 
 def launch_or_attach(project: Project) -> None:
