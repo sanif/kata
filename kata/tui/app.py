@@ -7,6 +7,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 
+from kata import __version__
 from kata.core.models import Project
 from kata.core.settings import get_settings, reload_settings
 from kata.services.registry import get_registry
@@ -50,7 +51,7 @@ class KataDashboard(App):
     """Main TUI application for Kata."""
 
     TITLE = "▸ kata"
-    SUB_TITLE = "workspace orchestrator"
+    SUB_TITLE = f"v{__version__}"
     ENABLE_COMMAND_PALETTE = False
 
     # Register custom Kata themes
@@ -77,6 +78,7 @@ class KataDashboard(App):
         height: 1;
         background: $background;
         color: $text-muted;
+        border-bottom: hkey $surface-lighten-1;
     }
 
     Header HeaderTitle {
@@ -95,22 +97,22 @@ class KataDashboard(App):
     }
 
     #tree-container {
-        width: 35;
+        width: 38;
         height: 100%;
-        border-right: vkey $surface-lighten-1;
+        border-right: blank $surface-lighten-1;
     }
 
     #preview-container {
         width: 1fr;
         height: 100%;
-        padding: 1 2;
+        padding: 1 3;
     }
 
     #recents-container {
         width: 100%;
         height: 12;
         display: block;
-        border-top: solid $surface-lighten-1;
+        border-top: hkey $surface-lighten-1;
     }
 
     #recents-container.-hidden {
@@ -172,6 +174,7 @@ class KataDashboard(App):
     _explicit_quit: bool = False
     _focus_on_recents: bool = False
     _notification_badge_count: int = 0
+    _session_to_switch: str | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the dashboard."""
@@ -258,9 +261,9 @@ class KataDashboard(App):
             if count != self._notification_badge_count:
                 self._notification_badge_count = count
                 if count > 0:
-                    self.sub_title = f"workspace orchestrator  |  🔔 {count}"
+                    self.sub_title = f"v{__version__}  |  🔔 {count}"
                 else:
-                    self.sub_title = "workspace orchestrator"
+                    self.sub_title = f"v{__version__}"
         except Exception:
             pass
 
@@ -376,13 +379,9 @@ class KataDashboard(App):
         """Handle notification center result (session name to switch to)."""
         if result is None:
             return
-        # Switch to the tmux session
-        try:
-            from kata.services.notifications.focus import switch_to_session
-
-            switch_to_session(result)
-        except Exception:
-            self.notify(f"Failed to switch to session: {result}", severity="error")
+        # Store session name and exit — switch happens after app.run() returns
+        self._session_to_switch = result
+        self.exit()
 
     def action_switch_section(self) -> None:
         """Switch focus between projects tree and recents section."""
@@ -610,9 +609,10 @@ def run_dashboard() -> None:
     app = KataDashboard()
     app.run()
 
-    # After the app exits, launch the selected project or zoxide entry
+    # After the app exits, launch the selected project, zoxide entry, or switch session
     project = app._project_to_launch
     zoxide_entry = app._zoxide_to_launch
+    session_to_switch = app._session_to_switch
 
     if project:
         try:
@@ -624,3 +624,10 @@ def run_dashboard() -> None:
             launch_or_attach_adhoc(zoxide_entry.path)
         except Exception as e:
             print(f"Error: {e}")
+    elif session_to_switch:
+        try:
+            from kata.services.sessions import attach_session
+
+            attach_session(session_to_switch)
+        except Exception as e:
+            print(f"Error switching to session: {e}")

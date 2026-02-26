@@ -472,7 +472,7 @@ class AddWizard(ModalScreen):
         with Vertical(id="wizard-container"):
             with Vertical(id="wizard-header"):
                 yield Static("Add New Project", id="wizard-title")
-                yield Static("Step 1 of 4", id="step-indicator")
+                yield Static("[dim]● ○ ○ ○[/dim]", id="step-indicator")
 
             with Container(id="wizard-content"):
                 yield PathStep(id="path-step")
@@ -509,7 +509,8 @@ class AddWizard(ModalScreen):
         # Update step indicator
         try:
             indicator = self.query_one("#step-indicator", Static)
-            indicator.update(f"Step {step} of 4")
+            dots = " ".join("●" if i <= step else "○" for i in range(1, 5))
+            indicator.update(f"[dim]{dots}[/dim]")
         except Exception:
             pass
 

@@ -1,5 +1,6 @@
 """Preview pane widget for displaying project details."""
 
+import os
 from datetime import datetime
 
 from textual.reactive import reactive
@@ -117,12 +118,12 @@ class PreviewPane(Widget):
 
         # Status styling
         status_styles = {
-            "active": ("green", "◆", "running"),
-            "detached": ("yellow", "◆", "paused"),
-            "idle": ("dim", "◇", "idle"),
+            "active": ("green", "●", "running"),
+            "detached": ("yellow", "●", "paused"),
+            "idle": ("dim", "○", "idle"),
         }
         status_color, status_icon, status_text = status_styles.get(
-            status.value, ("dim", "◇", "idle")
+            status.value, ("dim", "○", "idle")
         )
 
         # Build header with icon
@@ -131,10 +132,14 @@ class PreviewPane(Widget):
 [{status_color}]{status_icon} {status_text}[/{status_color}]
 """
 
-        # Info section with aligned labels
-        content += f"""
-[dim]├─[/dim] [dim]group[/dim]   {project.group.lower()}
-[dim]├─[/dim] [dim]type[/dim]    {project_type.value}"""
+        home = os.path.expanduser("~")
+        display_path = project.path
+        if display_path.startswith(home):
+            display_path = "~" + display_path[len(home) :]
+
+        # Info section with clean labeled rows
+        content += f"\n  [dim]group     [/dim]{project.group.lower()}"
+        content += f"\n  [dim]type      [/dim]{project_type.value}"
 
         # Add git info if available
         if git_status.is_git_repo:
@@ -146,9 +151,9 @@ class PreviewPane(Widget):
             if git_status.behind > 0:
                 sync_info += f" [red]↓{git_status.behind}[/red]"
 
-            content += f"\n[dim]├─[/dim] [dim]branch[/dim]  [cyan]{branch_display}[/cyan]{dirty}{sync_info}"
+            content += f"\n  [dim]branch    [/dim][cyan]{branch_display}[/cyan]{dirty}{sync_info}"
 
-        content += f"\n[dim]└─[/dim] [dim]path[/dim]    [dim]{project.path}[/dim]"
+        content += f"\n  [dim]path      [/dim][dim]{display_path}[/dim]"
 
         # Activity sparkline (visual representation of usage)
         sparkline = self._generate_sparkline(project.times_opened)
@@ -156,11 +161,9 @@ class PreviewPane(Widget):
         # Stats section
         content += f"""
 
-[dim]─────────────────────────────[/dim]
-
-  [dim]activity[/dim]  {sparkline}
-  [dim]opened[/dim]    {project.times_opened}×
-  [dim]last[/dim]      {last_opened}"""
+  [dim]activity   [/dim]{sparkline}
+  [dim]opened     [/dim]{project.times_opened}×
+  [dim]last       [/dim]{last_opened}"""
 
         # Add layout summary
         config_path = get_template_path(project)
@@ -169,9 +172,7 @@ class PreviewPane(Widget):
             layout_summary = render_layout_summary(layout)
             content += f"""
 
-[dim]─────────────────────────────[/dim]
-
-[dim]{layout_summary}[/dim]"""
+  [dim]{layout_summary}[/dim]"""
 
         content_widget.update(content)
 
@@ -207,11 +208,11 @@ class PreviewPane(Widget):
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
         indicators = {
-            SessionStatus.ACTIVE: "[green]◆[/green]",
-            SessionStatus.DETACHED: "[yellow]◆[/yellow]",
-            SessionStatus.IDLE: "[dim]◇[/dim]",
+            SessionStatus.ACTIVE: "[green]●[/green]",
+            SessionStatus.DETACHED: "[yellow]●[/yellow]",
+            SessionStatus.IDLE: "[dim]○[/dim]",
         }
-        return indicators.get(status, "[dim]◇[/dim]")
+        return indicators.get(status, "[dim]○[/dim]")
 
     def _format_date(self, date_val: str | datetime | None) -> str:
         """Format a date string or datetime for display."""
@@ -290,15 +291,19 @@ class PreviewPane(Widget):
         }
         type_icons.get(project_type.value, "󰉋")
 
+        home = os.path.expanduser("~")
+        display_path = entry.path
+        if display_path.startswith(home):
+            display_path = "~" + display_path[len(home) :]
+
         # Build content
         content = f"""[bold][yellow]󰉋[/yellow] {entry.name}[/bold]
 
-[dim]◇ not registered[/dim]
+[dim]○ not registered[/dim]
 """
 
         # Info section
-        content += f"""
-[dim]├─[/dim] [dim]type[/dim]    {project_type.value}"""
+        content += f"  [dim]type      [/dim]{project_type.value}"
 
         # Add git info if available
         if git_status.is_git_repo:
@@ -310,18 +315,14 @@ class PreviewPane(Widget):
             if git_status.behind > 0:
                 sync_info += f" [red]↓{git_status.behind}[/red]"
 
-            content += f"\n[dim]├─[/dim] [dim]branch[/dim]  [cyan]{branch_display}[/cyan]{dirty}{sync_info}"
+            content += f"\n  [dim]branch    [/dim][cyan]{branch_display}[/cyan]{dirty}{sync_info}"
 
-        content += f"\n[dim]└─[/dim] [dim]path[/dim]    [dim]{entry.path}[/dim]"
+        content += f"\n  [dim]path      [/dim][dim]{display_path}[/dim]"
 
         # Zoxide score
         content += f"""
 
-[dim]─────────────────────────────[/dim]
-
-  [dim]zoxide score[/dim]  {entry.score:.1f}
-
-[dim]─────────────────────────────[/dim]
+  [dim]zoxide     [/dim]{entry.score:.1f}
 
 [dim]Press [/dim][bold]a[/bold][dim] to add as project[/dim]"""
 

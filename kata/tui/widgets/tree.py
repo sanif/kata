@@ -50,7 +50,7 @@ class ProjectTree(Widget):
 
     ProjectTree > Tree {
         background: $background;
-        padding: 1 1;
+        padding: 1 2;
         scrollbar-size: 1 1;
     }
 
@@ -63,11 +63,11 @@ class ProjectTree(Widget):
     }
 
     ProjectTree > Tree > .tree--cursor {
-        background: $surface;
+        background: $primary 15%;
     }
 
     ProjectTree > Tree > .tree--highlight {
-        background: $surface;
+        background: $primary 15%;
     }
     """
 
@@ -128,7 +128,11 @@ class ProjectTree(Widget):
         self.call_later(self._focus_tree)
 
     def _build_tree_initial(self) -> None:
-        """Build initial tree structure (status will be updated separately)."""
+        """Build initial tree structure without I/O-heavy operations.
+
+        Skips git status and project type detection for fast first paint.
+        These are populated by the first refresh_projects() call.
+        """
         tree = self.query_one("#project-tree", Tree)
         tree.clear()
 
@@ -143,35 +147,20 @@ class ProjectTree(Widget):
                 groups[group_name] = []
             groups[group_name].append(project)
 
-        # Sort groups and projects - use IDLE status initially
+        # Sort groups and projects - use IDLE status and generic icon initially
         self._projects_by_name.clear()
         for group_name in sorted(groups.keys()):
             group_key = group_name.lower()
             group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
-            group_label = f"[dim]{group_icon} {group_name.lower()}[/dim]"
+            group_label = f"[bold dim]{group_icon} {group_name.upper()}[/bold dim]"
 
             group_node = tree.root.add(group_label, expand=group_name in self._expanded_groups)
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                # Use IDLE status initially - will be updated by refresh
                 indicator = self._get_status_indicator(SessionStatus.IDLE)
-
-                project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(
-                    project_type.value, PROJECT_TYPE_ICONS["generic"]
-                )
-
-                git_status = get_git_status(project.path)
-                git_indicator = format_git_indicator_rich(git_status)
-
-                # Shortcut prefix if assigned
                 shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
-
-                if git_indicator:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
-                else:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
+                label = f"{indicator} {shortcut_prefix}{project.name}"
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -240,11 +229,11 @@ class ProjectTree(Widget):
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
         indicators = {
-            SessionStatus.ACTIVE: "[green]◆[/green]",
-            SessionStatus.DETACHED: "[yellow]◆[/yellow]",
-            SessionStatus.IDLE: "[dim]◇[/dim]",
+            SessionStatus.ACTIVE: "[green]●[/green]",
+            SessionStatus.DETACHED: "[yellow]●[/yellow]",
+            SessionStatus.IDLE: "[dim]○[/dim]",
         }
-        return indicators.get(status, "[dim]◇[/dim]")
+        return indicators.get(status, "[dim]○[/dim]")
 
     def refresh_projects(self) -> None:
         """Refresh the project tree from registry."""
@@ -283,7 +272,7 @@ class ProjectTree(Widget):
             # Get group icon
             group_key = group_name.lower()
             group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
-            group_label = f"[dim]{group_icon} {group_name.lower()}[/dim]"
+            group_label = f"[bold dim]{group_icon} {group_name.upper()}[/bold dim]"
 
             group_node = tree.root.add(group_label, expand=group_name in self._expanded_groups)
             group_node.data = {"type": "group", "name": group_name}
@@ -434,7 +423,7 @@ class ProjectTree(Widget):
         for group_name in sorted(groups.keys()):
             group_key = group_name.lower()
             group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
-            group_label = f"[dim]{group_icon} {group_name.lower()}[/dim]"
+            group_label = f"[bold dim]{group_icon} {group_name.upper()}[/bold dim]"
 
             group_node = tree.root.add(group_label, expand=True)
             group_node.data = {"type": "group", "name": group_name}

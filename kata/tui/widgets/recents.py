@@ -30,32 +30,31 @@ class RecentsPanel(Widget, can_focus=True):
     RecentsPanel {
         width: 100%;
         height: 100%;
-        background: $surface;
+        background: $background;
     }
 
     RecentsPanel #recents-header {
         width: 100%;
         height: 1;
-        padding: 0 1;
-        background: $surface-darken-1;
+        padding: 0 2;
         color: $text-muted;
     }
 
     RecentsPanel #recents-list {
         width: 100%;
         height: 1fr;
-        background: $surface;
+        background: $background;
         scrollbar-size: 1 1;
         padding: 0 1;
     }
 
     RecentsPanel #recents-list:focus {
-        background: $surface;
+        background: $background;
     }
 
     RecentsPanel #recents-list > .option-list--option {
         padding: 0 1;
-        background: $surface;
+        background: $background;
     }
 
     RecentsPanel #recents-list > .option-list--option-highlighted {
@@ -165,7 +164,7 @@ class RecentsPanel(Widget, can_focus=True):
                 display_path = "~" + display_path[len(home) :]
 
             # Format: icon name path
-            label = f"[yellow]{type_icon}[/yellow] {entry.name}  [dim]{display_path}[/dim]"
+            label = f"[dim]{type_icon}[/dim] {entry.name}  [dim]{display_path}[/dim]"
             option_list.add_option(Option(label, id=entry.path))
 
     def filter_recents(self, query: str) -> None:

@@ -58,10 +58,10 @@ class NotificationCenterModal(ModalScreen[str | None]):
     }
 
     NotificationCenterModal #notif-container {
-        width: 80;
-        height: 30;
+        width: 90;
+        height: 35;
         background: $surface;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
         padding: 1 2;
     }
 
@@ -80,7 +80,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
     }
 
     NotificationCenterModal #notif-list > .option-list--option-highlighted {
-        background: $primary 30%;
+        background: $primary 15%;
     }
 
     NotificationCenterModal #notif-footer {
@@ -100,7 +100,6 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Close", show=False),
-        Binding("enter", "switch_session", "Switch", show=True),
         Binding("d", "dismiss_selected", "Dismiss"),
         Binding("shift+d", "dismiss_all", "Dismiss All"),
         Binding("r", "mark_read", "Read"),
@@ -153,7 +152,15 @@ class NotificationCenterModal(ModalScreen[str | None]):
                 else "[dim]○[/dim]"
             )
             session = f"[cyan]{n.session_name}[/cyan]" if n.session_name else ""
-            label = f" {icon} {time_str:>8}  {n.title:<30} {session:<15} {status_badge}"
+            # First line: icon, title, session, status
+            line1 = f" {icon} {n.title:<34} {session:<16} {status_badge}"
+            # Second line: time and body preview
+            body_preview = ""
+            if n.body:
+                first_line = n.body.strip().split("\n")[0][:50]
+                body_preview = f" · {first_line}"
+            line2 = f"    [dim]{time_str}{body_preview}[/dim]"
+            label = f"{line1}\n{line2}"
             option_list.add_option(Option(label))
             self._index_map[i] = i
 
@@ -169,8 +176,8 @@ class NotificationCenterModal(ModalScreen[str | None]):
         """Close the modal."""
         self.dismiss(None)
 
-    def action_switch_session(self) -> None:
-        """Switch to the session of the selected notification."""
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle Enter key on an option (switch to session)."""
         n = self._get_selected_notification()
         if not n:
             return

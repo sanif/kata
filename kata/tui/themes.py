@@ -14,10 +14,10 @@ KATA_DARK = Theme(
     accent="#f472b6",  # Pink-400
     foreground="#e2e8f0",  # Slate-200
     background="#0f172a",  # Slate-900 - deep blue-black
-    surface="#1e293b",  # Slate-800
-    panel="#334155",  # Slate-700
+    surface="#182033",  # Slightly lighter than bg for subtle elevation
+    panel="#243044",  # Clearer card/modal distinction
     dark=True,
-    luminosity_spread=0.15,
+    luminosity_spread=0.18,
     text_alpha=0.95,
 )
 
@@ -90,10 +90,10 @@ KATA_GLASS = Theme(
     accent="#f9a8d4",  # Pink-300
     foreground="#f1f5f9",  # Slate-100 - bright text
     background="#1a1f2e",  # Muted dark blue-gray (frosted dark)
-    surface="#252b3b",  # Slightly lighter (glass layer 1)
-    panel="#303847",  # Glass layer 2
+    surface="#232940",  # Slightly lighter (glass layer 1) - better elevation
+    panel="#2e3650",  # Glass layer 2 - clearer distinction
     dark=True,
-    luminosity_spread=0.10,  # Low spread for subtle transitions
+    luminosity_spread=0.15,  # Better utility class spread
     text_alpha=0.92,
 )
 

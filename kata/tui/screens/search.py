@@ -33,10 +33,10 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     }
 
     SearchModal #search-container {
-        width: 70;
-        height: 20;
+        width: 75;
+        height: 25;
         background: $surface;
-        border: solid $primary;
+        border: solid $surface-lighten-1;
         padding: 1 2;
     }
 
@@ -69,7 +69,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     }
 
     SearchModal #search-results > .option-list--option-highlighted {
-        background: $primary 30%;
+        background: $primary 20%;
     }
     """
 

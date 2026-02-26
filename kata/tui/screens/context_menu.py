@@ -45,7 +45,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
     }
 
     ContextMenuScreen #menu-container {
-        width: 36;
+        width: 40;
         height: auto;
         max-height: 16;
         background: $surface;
@@ -469,7 +469,7 @@ class ConfirmDialog(ModalScreen[bool]):
     }
 
     ConfirmDialog #dialog-container {
-        width: 36;
+        width: 40;
         height: auto;
         background: $surface;
         border: solid $surface-lighten-1;

@@ -26,7 +26,7 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     SettingsScreen #settings-container {
-        width: 60;
+        width: 65;
         height: auto;
         max-height: 35;
         background: $surface;
@@ -38,7 +38,7 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #settings-title {
         text-style: bold;
         color: $text;
-        margin-bottom: 1;
+        margin-bottom: 2;
         text-align: center;
     }
 
