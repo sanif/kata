@@ -15,6 +15,7 @@ from kata.services.sessions import (
     launch_or_attach_adhoc,
 )
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
+from kata.tui.screens.notification_center import NotificationCenterModal
 from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
 from kata.tui.screens.wizard import AddWizard
@@ -148,6 +149,7 @@ class KataDashboard(App):
         Binding("?", "help", "Help"),
         Binding("m", "context_menu", "Menu"),
         Binding("s", "settings", "Settings"),
+        Binding("n", "notifications", "Notifs"),
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
         Binding("tab", "switch_section", "Switch Section", show=False),
@@ -169,6 +171,7 @@ class KataDashboard(App):
     _refresh_timer: Timer | None = None
     _explicit_quit: bool = False
     _focus_on_recents: bool = False
+    _notification_badge_count: int = 0
 
     def compose(self) -> ComposeResult:
         """Compose the dashboard."""
@@ -231,6 +234,21 @@ class KataDashboard(App):
             preview.refresh_status()
             tree = self.query_one(ProjectTree)
             tree.refresh_projects()
+        except Exception:
+            pass
+
+        # Refresh notification badge count
+        try:
+            from kata.services.notifications.store import get_notification_store
+
+            store = get_notification_store()
+            count = store.unread_count()
+            if count != self._notification_badge_count:
+                self._notification_badge_count = count
+                if count > 0:
+                    self.sub_title = f"workspace orchestrator  |  🔔 {count}"
+                else:
+                    self.sub_title = "workspace orchestrator"
         except Exception:
             pass
 
@@ -337,6 +355,22 @@ class KataDashboard(App):
     def _on_settings_closed(self, result: None) -> None:
         """Handle settings screen close."""
         pass
+
+    def action_notifications(self) -> None:
+        """Open notification center."""
+        self.push_screen(NotificationCenterModal(), self._on_notification_result)
+
+    def _on_notification_result(self, result: str | None) -> None:
+        """Handle notification center result (session name to switch to)."""
+        if result is None:
+            return
+        # Switch to the tmux session
+        try:
+            from kata.services.notifications.focus import switch_to_session
+
+            switch_to_session(result)
+        except Exception:
+            self.notify(f"Failed to switch to session: {result}", severity="error")
 
     def action_switch_section(self) -> None:
         """Switch focus between projects tree and recents section."""
