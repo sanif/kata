@@ -206,6 +206,18 @@ class KataDashboard(App):
         # Update preview with first project after tree loads and status is updated
         self.set_timer(0.3, self._show_first_project)
 
+        # Prune old notifications on TUI startup
+        try:
+            from kata.services.notifications.store import get_notification_store
+
+            store = get_notification_store()
+            store.prune(
+                max_age_days=settings.notifications_retention_days,
+                max_count=settings.notifications_max_count,
+            )
+        except Exception:
+            pass
+
     def _initial_status_refresh(self) -> None:
         """Refresh status after initial UI render."""
         # Small delay to ensure tmux server is accessible
