@@ -84,7 +84,8 @@ class Settings:
         )
 
         # Sound pack validation
-        if self.notifications_sound_pack not in ("default", "gentle", "arcade"):
+        valid_packs = ("default", "gentle", "arcade", "arabic", "zen", "funk")
+        if self.notifications_sound_pack not in valid_packs:
             self.notifications_sound_pack = "default"
 
         # Volume: 0.0-1.0

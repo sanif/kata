@@ -112,7 +112,7 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #sound-pack-list {
         width: 100%;
         height: auto;
-        max-height: 5;
+        max-height: 8;
         background: $surface;
         border: tall $surface-lighten-1;
     }
