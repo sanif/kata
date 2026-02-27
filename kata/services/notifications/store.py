@@ -48,9 +48,19 @@ class NotificationStore:
         self._db_path = db_path or NOTIFICATIONS_DB
         if db_path is None:
             ensure_config_dirs()
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), timeout=15, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
+        self._conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # DB locked by another process, WAL will be set on next open
+        # Only create schema if table doesn't exist (avoids write lock)
+        tables = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='notifications'"
+        ).fetchone()
+        if not tables:
+            self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:
         """Close the database connection."""
@@ -111,6 +121,42 @@ class NotificationStore:
             (source.value,),
         ).fetchall()
         return [self._row_to_notification(r) for r in rows]
+
+    def list_grouped_by_session(self) -> dict[str, list[Notification]]:
+        """Group non-dismissed notifications by session_name.
+
+        Returns an ordered dict: keys are session names sorted by most-recent
+        notification timestamp (newest first). Entries with empty session_name
+        are excluded.
+        """
+        rows = self._conn.execute(
+            """SELECT * FROM notifications
+               WHERE status != ? AND session_name != ''
+               ORDER BY timestamp DESC""",
+            (NotificationStatus.DISMISSED.value,),
+        ).fetchall()
+
+        groups: dict[str, list[Notification]] = {}
+        for row in rows:
+            n = self._row_to_notification(row)
+            groups.setdefault(n.session_name, []).append(n)
+        return groups
+
+    def dismiss_by_session(self, session_name: str) -> None:
+        """Dismiss all notifications for a session."""
+        self._conn.execute(
+            "UPDATE notifications SET status = ? WHERE session_name = ? AND status != ?",
+            (NotificationStatus.DISMISSED.value, session_name, NotificationStatus.DISMISSED.value),
+        )
+        self._conn.commit()
+
+    def mark_session_read(self, session_name: str) -> None:
+        """Mark all notifications for a session as read."""
+        self._conn.execute(
+            "UPDATE notifications SET status = ? WHERE session_name = ? AND status = ?",
+            (NotificationStatus.READ.value, session_name, NotificationStatus.UNREAD.value),
+        )
+        self._conn.commit()
 
     def update_status(self, notification_id: str, status: NotificationStatus) -> None:
         """Update a notification's status."""

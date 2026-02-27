@@ -257,3 +257,96 @@ class TestNotificationStore:
         finally:
             store.close()
             temp_path.unlink(missing_ok=True)
+
+    def test_list_grouped_by_session(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(_make_notification(title="A1", session_name="proj-a"))
+            store.add(_make_notification(title="A2", session_name="proj-a"))
+            store.add(_make_notification(title="B1", session_name="proj-b"))
+            grouped = store.list_grouped_by_session()
+            assert "proj-a" in grouped
+            assert "proj-b" in grouped
+            assert len(grouped["proj-a"]) == 2
+            assert len(grouped["proj-b"]) == 1
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
+    def test_list_grouped_excludes_dismissed(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(_make_notification(title="Active", session_name="proj-a"))
+            dismissed = _make_notification(
+                title="Gone", session_name="proj-a", status=NotificationStatus.DISMISSED
+            )
+            store.add(dismissed)
+            grouped = store.list_grouped_by_session()
+            assert len(grouped["proj-a"]) == 1
+            assert grouped["proj-a"][0].title == "Active"
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
+    def test_list_grouped_empty_session_name_excluded(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(_make_notification(title="No session", session_name=""))
+            store.add(_make_notification(title="Has session", session_name="proj-a"))
+            grouped = store.list_grouped_by_session()
+            assert "" not in grouped
+            assert "proj-a" in grouped
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
+    def test_list_grouped_ordered_by_most_recent(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(
+                _make_notification(
+                    title="Old",
+                    session_name="proj-old",
+                    timestamp=datetime.now() - timedelta(hours=2),
+                )
+            )
+            store.add(
+                _make_notification(
+                    title="New",
+                    session_name="proj-new",
+                    timestamp=datetime.now(),
+                )
+            )
+            grouped = store.list_grouped_by_session()
+            keys = list(grouped.keys())
+            assert keys[0] == "proj-new"
+            assert keys[1] == "proj-old"
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
+    def test_dismiss_by_session(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(_make_notification(title="A1", session_name="proj-a"))
+            store.add(_make_notification(title="A2", session_name="proj-a"))
+            store.add(_make_notification(title="B1", session_name="proj-b"))
+            store.dismiss_by_session("proj-a")
+            grouped = store.list_grouped_by_session()
+            assert "proj-a" not in grouped
+            assert "proj-b" in grouped
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
+    def test_mark_session_read(self):
+        store, temp_path = self._make_store()
+        try:
+            store.add(_make_notification(title="U1", session_name="proj-a"))
+            store.add(_make_notification(title="U2", session_name="proj-a"))
+            store.mark_session_read("proj-a")
+            unread = store.list_by_status(NotificationStatus.UNREAD)
+            assert len(unread) == 0
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
