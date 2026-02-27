@@ -52,7 +52,7 @@ class PathStep(WizardStep):
 
     PathStep #path-tree {
         height: 1fr;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
     }
 
     PathStep .path-hint {
@@ -111,7 +111,7 @@ class GroupStep(WizardStep):
     GroupStep #existing-groups {
         height: auto;
         max-height: 10;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
     }
 
     GroupStep .group-hint {
@@ -160,7 +160,7 @@ class TemplateStep(WizardStep):
     TemplateStep #template-list {
         height: auto;
         max-height: 12;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
     }
 
     TemplateStep .detected-type {
@@ -246,14 +246,14 @@ class LayoutStep(WizardStep):
     LayoutStep #layout-list {
         height: auto;
         max-height: 8;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
     }
 
     LayoutStep #layout-preview {
         margin-top: 1;
         padding: 1;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         height: auto;
     }
 
@@ -330,7 +330,7 @@ class LayoutStep(WizardStep):
         else:  # CUSTOM
             return (
                 "[dim]┌────────────┐[/dim]\n"
-                "[dim]│[/dim]   editor   [dim]│[/dim]  [yellow]← Edit YAML after creation[/yellow]\n"
+                "[dim]│[/dim]   editor   [dim]│[/dim]  [$warning]← Edit YAML after creation[/$warning]\n"
                 "[dim]└────────────┘[/dim]"
             )
 
@@ -385,7 +385,7 @@ class AddWizard(ModalScreen):
         min-height: 20;
         max-height: 30;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1;
     }
 
@@ -396,7 +396,7 @@ class AddWizard(ModalScreen):
 
     AddWizard #wizard-title {
         text-style: bold;
-        color: $text;
+        color: $primary;
         text-align: center;
     }
 
@@ -471,8 +471,8 @@ class AddWizard(ModalScreen):
         """Compose the wizard."""
         with Vertical(id="wizard-container"):
             with Vertical(id="wizard-header"):
-                yield Static("Add New Project", id="wizard-title")
-                yield Static("[dim]● ○ ○ ○[/dim]", id="step-indicator")
+                yield Static("󰐕 Add New Project", id="wizard-title")
+                yield Static("[dim]● ─ ○ ─ ○ ─ ○[/dim]", id="step-indicator")
 
             with Container(id="wizard-content"):
                 yield PathStep(id="path-step")
@@ -509,8 +509,10 @@ class AddWizard(ModalScreen):
         # Update step indicator
         try:
             indicator = self.query_one("#step-indicator", Static)
-            dots = " ".join("●" if i <= step else "○" for i in range(1, 5))
-            indicator.update(f"[dim]{dots}[/dim]")
+            dots = " ─ ".join(
+                "[$primary]●[/$primary]" if i <= step else "[dim]○[/dim]" for i in range(1, 5)
+            )
+            indicator.update(dots)
         except Exception:
             pass
 

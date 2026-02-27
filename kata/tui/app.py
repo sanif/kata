@@ -5,7 +5,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.timer import Timer
-from textual.widgets import Footer, Header, Static
+from textual.widget import Widget
+from textual.widgets import Footer, Static
 
 from kata import __version__
 from kata.core.models import Project
@@ -25,6 +26,64 @@ from kata.tui.widgets.preview import PreviewPane
 from kata.tui.widgets.recents import RecentsPanel
 from kata.tui.widgets.tree import ProjectTree
 from kata.utils.zoxide import ZoxideEntry
+
+KATA_ART = """\
+█▄▀  ▄▀▄  ▀█▀  ▄▀▄
+█ █  █▀█   █   █▀█
+▀ ▀  ▀ ▀   ▀   ▀ ▀"""
+
+
+class KataBanner(Widget):
+    """Custom ASCII art header banner."""
+
+    DEFAULT_CSS = """
+    KataBanner {
+        dock: top;
+        width: 100%;
+        height: 6;
+        background: $background;
+        border-bottom: tall $surface-lighten-1;
+    }
+
+    KataBanner #banner-art {
+        width: 100%;
+        height: 3;
+        margin-top: 1;
+        content-align: center middle;
+        text-align: center;
+        color: $primary;
+        text-style: bold;
+    }
+
+    KataBanner #banner-version {
+        width: 100%;
+        height: 1;
+        content-align: center middle;
+        text-align: center;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, version: str = "") -> None:
+        super().__init__()
+        self._version = version
+        self._badge_count = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static(KATA_ART, id="banner-art")
+        yield Static(f"v{self._version}", id="banner-version")
+
+    def update_badge(self, count: int) -> None:
+        """Update the notification badge count."""
+        self._badge_count = count
+        try:
+            version_widget = self.query_one("#banner-version", Static)
+            if count > 0:
+                version_widget.update(f"v{self._version}  │  󰂚 {count}")
+            else:
+                version_widget.update(f"v{self._version}")
+        except Exception:
+            pass
 
 
 class EmptyState(Static):
@@ -73,19 +132,6 @@ class KataDashboard(App):
         background: $background;
     }
 
-    Header {
-        dock: top;
-        height: 1;
-        background: $background;
-        color: $text-muted;
-        border-bottom: hkey $surface-lighten-1;
-    }
-
-    Header HeaderTitle {
-        color: $primary;
-        text-style: bold;
-    }
-
     #main-container {
         width: 100%;
         height: 100%;
@@ -99,7 +145,7 @@ class KataDashboard(App):
     #tree-container {
         width: 38;
         height: 100%;
-        border-right: blank $surface-lighten-1;
+        border-right: vkey $surface-lighten-1;
     }
 
     #preview-container {
@@ -112,7 +158,7 @@ class KataDashboard(App):
         width: 100%;
         height: 12;
         display: block;
-        border-top: hkey $surface-lighten-1;
+        border-top: tall $surface-lighten-1;
     }
 
     #recents-container.-hidden {
@@ -131,7 +177,7 @@ class KataDashboard(App):
     }
 
     Footer > .footer--key {
-        background: transparent;
+        background: $surface;
         color: $primary;
         text-style: bold;
     }
@@ -178,7 +224,7 @@ class KataDashboard(App):
 
     def compose(self) -> ComposeResult:
         """Compose the dashboard."""
-        yield Header()
+        yield KataBanner(version=__version__)
 
         registry = get_registry()
         if len(registry) == 0:
@@ -260,10 +306,8 @@ class KataDashboard(App):
             count = store.unread_count()
             if count != self._notification_badge_count:
                 self._notification_badge_count = count
-                if count > 0:
-                    self.sub_title = f"v{__version__}  |  🔔 {count}"
-                else:
-                    self.sub_title = f"v{__version__}"
+                banner = self.query_one(KataBanner)
+                banner.update_badge(count)
         except Exception:
             pass
 
@@ -373,6 +417,9 @@ class KataDashboard(App):
 
     def action_notifications(self) -> None:
         """Open notification center."""
+        # Guard against re-entry (key propagation while modal is already open)
+        if any(isinstance(s, NotificationCenterModal) for s in self.screen_stack):
+            return
         self.push_screen(NotificationCenterModal(), self._on_notification_result)
 
     def _on_notification_result(self, result: str | None) -> None:

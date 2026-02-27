@@ -88,7 +88,12 @@ class PreviewPane(Widget):
 
         if self.project is None:
             self.add_class("-empty")
-            content_widget.update("[dim]Select a project to view details[/dim]")
+            content_widget.update(
+                "[dim]Select a project to view details[/dim]\n\n"
+                "[$primary]↑↓[/$primary] [dim]navigate[/dim]   "
+                "[$primary]enter[/$primary] [dim]launch[/dim]   "
+                "[$primary]/[/$primary] [dim]search[/dim]"
+            )
             return
 
         self.remove_class("-empty")
@@ -116,67 +121,66 @@ class PreviewPane(Widget):
         }
         type_icon = type_icons.get(project_type.value, "󰉋")
 
-        # Status styling
+        # Status styling — uses theme semantic colors
         status_styles = {
-            "active": ("green", "●", "running"),
-            "detached": ("yellow", "●", "paused"),
+            "active": ("$success", "●", "running"),
+            "detached": ("$warning", "●", "paused"),
             "idle": ("dim", "○", "idle"),
         }
         status_color, status_icon, status_text = status_styles.get(
             status.value, ("dim", "○", "idle")
         )
 
-        # Build header with icon
-        content = f"""[bold]{type_icon} {project.name}[/bold]
-
-[{status_color}]{status_icon} {status_text}[/{status_color}]
-"""
-
         home = os.path.expanduser("~")
         display_path = project.path
         if display_path.startswith(home):
             display_path = "~" + display_path[len(home) :]
 
-        # Info section with clean labeled rows
-        content += f"\n  [dim]group     [/dim]{project.group.lower()}"
-        content += f"\n  [dim]type      [/dim]{project_type.value}"
+        # Build header
+        content = f"  [bold]{type_icon}[/bold]  [bold]{project.name}[/bold]   [{status_color}]{status_icon} {status_text}[/{status_color}]"
+        content += f"\n  [dim]{display_path}[/dim]"
+
+        # Separator
+        content += "\n\n  [dim]╶───────────────────────────────╴[/dim]"
+
+        # Info section
+        content += f"\n\n  [dim]group[/dim]        {project.group.lower()}"
+        content += f"\n  [dim]type[/dim]         {project_type.value}"
 
         # Add git info if available
         if git_status.is_git_repo:
             branch_display = git_status.branch or "unknown"
-            dirty = " [yellow]✱[/yellow]" if git_status.is_dirty else ""
+            dirty = " [$warning]✱[/$warning]" if git_status.is_dirty else ""
             sync_info = ""
             if git_status.ahead > 0:
-                sync_info += f" [green]↑{git_status.ahead}[/green]"
+                sync_info += f" [$success]↑{git_status.ahead}[/$success]"
             if git_status.behind > 0:
-                sync_info += f" [red]↓{git_status.behind}[/red]"
+                sync_info += f" [$error]↓{git_status.behind}[/$error]"
 
-            content += f"\n  [dim]branch    [/dim][cyan]{branch_display}[/cyan]{dirty}{sync_info}"
+            content += f"\n  [dim]branch[/dim]       [$primary]{branch_display}[/$primary]{dirty}{sync_info}"
 
-        content += f"\n  [dim]path      [/dim][dim]{display_path}[/dim]"
+        # Separator
+        content += "\n\n  [dim]╶───────────────────────────────╴[/dim]"
 
         # Activity sparkline (visual representation of usage)
         sparkline = self._generate_sparkline(project.times_opened)
 
         # Stats section
-        content += f"""
-
-  [dim]activity   [/dim]{sparkline}
-  [dim]opened     [/dim]{project.times_opened}×
-  [dim]last       [/dim]{last_opened}"""
+        content += f"\n\n  [dim]activity[/dim]     {sparkline}"
+        content += f"\n  [dim]opened[/dim]       {project.times_opened}×"
+        content += f"\n  [dim]last[/dim]         {last_opened}"
 
         # Add layout summary
         config_path = get_template_path(project)
         layout = parse_tmuxp_config(config_path)
         if layout:
             layout_summary = render_layout_summary(layout)
-            content += f"""
-
-  [dim]{layout_summary}[/dim]"""
+            content += "\n\n  [dim]╶───────────────────────────────╴[/dim]"
+            content += f"\n\n  [dim]layout[/dim]       {layout_summary}"
 
         content_widget.update(content)
 
-    def _generate_sparkline(self, count: int, width: int = 10) -> str:
+    def _generate_sparkline(self, count: int, width: int = 12) -> str:
         """Generate a sparkline bar showing activity level.
 
         Args:
@@ -191,25 +195,26 @@ class PreviewPane(Widget):
         filled = min(count, max_count) * width // max_count
 
         # Use block characters for the bar
-        blocks = "█" * filled + "░" * (width - filled)
+        filled_blocks = "▓" * filled
+        empty_blocks = "░" * (width - filled)
 
         # Color based on activity level
         if count == 0:
-            return f"[dim]{blocks}[/dim]"
+            return f"[dim]{filled_blocks}{empty_blocks}[/dim]"
         elif count < 5:
-            return f"[dim]{blocks}[/dim]"
+            return f"[dim]{filled_blocks}[/dim][dim]{empty_blocks}[/dim]"
         elif count < 15:
-            return f"[cyan]{blocks}[/cyan]"
+            return f"[$primary]{filled_blocks}[/$primary][dim]{empty_blocks}[/dim]"
         elif count < 30:
-            return f"[green]{blocks}[/green]"
+            return f"[$primary]{filled_blocks}[/$primary][dim]{empty_blocks}[/dim]"
         else:
-            return f"[yellow]{blocks}[/yellow]"
+            return f"[$success]{filled_blocks}[/$success][dim]{empty_blocks}[/dim]"
 
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
         indicators = {
-            SessionStatus.ACTIVE: "[green]●[/green]",
-            SessionStatus.DETACHED: "[yellow]●[/yellow]",
+            SessionStatus.ACTIVE: "[$success]●[/$success]",
+            SessionStatus.DETACHED: "[$warning]●[/$warning]",
             SessionStatus.IDLE: "[dim]○[/dim]",
         }
         return indicators.get(status, "[dim]○[/dim]")
@@ -296,34 +301,33 @@ class PreviewPane(Widget):
         if display_path.startswith(home):
             display_path = "~" + display_path[len(home) :]
 
-        # Build content
-        content = f"""[bold][yellow]󰉋[/yellow] {entry.name}[/bold]
+        # Build content (matching project preview style)
+        content = f"  [bold][$secondary]󰉋[/$secondary][/bold]  [bold]{entry.name}[/bold]   [dim]○ not registered[/dim]"
+        content += f"\n  [dim]{display_path}[/dim]"
 
-[dim]○ not registered[/dim]
-"""
+        # Separator
+        content += "\n\n  [dim]╶───────────────────────────────╴[/dim]"
 
         # Info section
-        content += f"  [dim]type      [/dim]{project_type.value}"
+        content += f"\n\n  [dim]type[/dim]         {project_type.value}"
 
         # Add git info if available
         if git_status.is_git_repo:
             branch_display = git_status.branch or "unknown"
-            dirty = " [yellow]✱[/yellow]" if git_status.is_dirty else ""
+            dirty = " [$warning]✱[/$warning]" if git_status.is_dirty else ""
             sync_info = ""
             if git_status.ahead > 0:
-                sync_info += f" [green]↑{git_status.ahead}[/green]"
+                sync_info += f" [$success]↑{git_status.ahead}[/$success]"
             if git_status.behind > 0:
-                sync_info += f" [red]↓{git_status.behind}[/red]"
+                sync_info += f" [$error]↓{git_status.behind}[/$error]"
 
-            content += f"\n  [dim]branch    [/dim][cyan]{branch_display}[/cyan]{dirty}{sync_info}"
+            content += f"\n  [dim]branch[/dim]       [$primary]{branch_display}[/$primary]{dirty}{sync_info}"
 
-        content += f"\n  [dim]path      [/dim][dim]{display_path}[/dim]"
+        # Separator
+        content += "\n\n  [dim]╶───────────────────────────────╴[/dim]"
 
         # Zoxide score
-        content += f"""
-
-  [dim]zoxide     [/dim]{entry.score:.1f}
-
-[dim]Press [/dim][bold]a[/bold][dim] to add as project[/dim]"""
+        content += f"\n\n  [dim]score[/dim]        {entry.score:.1f}"
+        content += "\n\n  [dim]Press[/dim] [bold]a[/bold] [dim]to add as project[/dim]"
 
         content_widget.update(content)

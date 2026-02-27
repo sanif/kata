@@ -499,11 +499,12 @@ if [ -f "$TMUX_CONF" ] && grep -q "$KATA_TMUX_MARKER" "$TMUX_CONF"; then
     success "Tmux already configured for Kata"
 else
     echo ""
-    info "Add Ctrl+Space keybinding for project switching?"
+    info "Add tmux keybindings for Kata?"
     info "This will add the following to ~/.tmux.conf:"
     echo ""
     echo -e "${YELLOW}$KATA_TMUX_MARKER"
     echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"'
+    echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
     echo -e "${NC}"
 
     read -p "Add to ~/.tmux.conf? [y/N] " -n 1 -r
@@ -512,6 +513,7 @@ else
         echo "" >> "$TMUX_CONF"
         echo "$KATA_TMUX_MARKER" >> "$TMUX_CONF"
         echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> "$TMUX_CONF"
+        echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"' >> "$TMUX_CONF"
         # Auto-reload tmux config if tmux is running
         if [[ -n "$TMUX" ]]; then
             tmux source-file "$TMUX_CONF" 2>/dev/null && success "Tmux config reloaded"
@@ -551,7 +553,8 @@ echo "Quick start:"
 echo "  1. Add a project:     kata add ~/myproject"
 echo "  2. Open dashboard:    kata"
 echo "  3. Switch projects:   Ctrl+Space (in tmux)"
-echo "  4. Detach session:    Ctrl+Q"
+echo "  4. Notifications:    Ctrl+N (in tmux)"
+echo "  5. Detach session:    Ctrl+Q"
 echo ""
 echo "For more info: kata --help"
 echo ""

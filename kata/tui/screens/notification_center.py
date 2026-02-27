@@ -185,7 +185,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
         # Header
         try:
             header = self.query_one("#nc-header", Static)
-            count_text = f"  [cyan]{len(grouped)}[/cyan]" if grouped else ""
+            count_text = f"  [$primary]{len(grouped)}[/$primary]" if grouped else ""
             header.update(f"[bold]󰂚 Notifications[/bold]{count_text}")
         except Exception:
             pass

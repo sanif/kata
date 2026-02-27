@@ -59,15 +59,15 @@ class ProjectTree(Widget):
     }
 
     ProjectTree > Tree > .tree--guides {
-        color: $text-muted;
+        color: $surface-lighten-2;
     }
 
     ProjectTree > Tree > .tree--cursor {
-        background: $primary 15%;
+        background: $primary 22%;
     }
 
     ProjectTree > Tree > .tree--highlight {
-        background: $primary 15%;
+        background: $primary 22%;
     }
     """
 

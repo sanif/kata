@@ -62,7 +62,7 @@ class RecentsPanel(Widget, can_focus=True):
     }
 
     RecentsPanel #recents-list:focus > .option-list--option-highlighted {
-        background: $primary 25%;
+        background: $primary 22%;
     }
     """
 

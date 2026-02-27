@@ -34,8 +34,8 @@ class NotificationBadge(Widget):
     def render(self) -> str:
         """Render the badge text."""
         if self.unread_count > 0:
-            return f"[bold on red] 🔔 {self.unread_count} [/]"
-        return "[dim]🔔 0[/dim]"
+            return f"[bold on red] 󰂚 {self.unread_count} [/]"
+        return "[dim]󰂚 0[/dim]"
 
     def watch_unread_count(self) -> None:
         """React to count changes."""

@@ -1,5 +1,7 @@
 """Search modal screen for quick project/directory switching."""
 
+from datetime import datetime
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -36,7 +38,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         width: 75;
         height: 25;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -69,7 +71,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     }
 
     SearchModal #search-results > .option-list--option-highlighted {
-        background: $primary 20%;
+        background: $primary 25%;
     }
     """
 
@@ -92,7 +94,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     def compose(self) -> ComposeResult:
         """Compose the modal."""
         with Vertical(id="search-container"):
-            yield Static("[dim]󰍉 search[/dim]", id="search-header")
+            yield Static("[dim]󰍉 Quick Switch[/dim]", id="search-header")
             yield Input(placeholder="Type to search...", id="search-input")
             yield OptionList(id="search-results")
 
@@ -105,6 +107,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     def _load_data(self) -> None:
         """Load projects and zoxide entries."""
         registry = get_registry()
+        registry.reload()
         self._projects = list(registry.list_all())
         self._statuses = get_all_session_statuses()
 
@@ -127,7 +130,11 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         # Filter projects
         filtered_projects = [
             p
-            for p in sorted(self._projects, key=lambda p: p.name)
+            for p in sorted(
+                self._projects,
+                key=lambda p: (p.last_opened or datetime.min,),
+                reverse=True,
+            )
             if not query or self._fuzzy_match(query_lower, p.name.lower())
         ]
 
@@ -163,7 +170,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         if filtered_zoxide:
             if filtered_projects:
                 option_list.add_option(
-                    Option("[dim]─────────────────────────────────────────[/dim]", disabled=True)
+                    Option("[dim]╶───────────────────────────────────╴[/dim]", disabled=True)
                 )
                 option_idx += 1
             option_list.add_option(
@@ -177,7 +184,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
                     project_type.value, PROJECT_TYPE_ICONS["generic"]
                 )
 
-                label = f"  [dim]◇[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
+                label = f"  [dim]○[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
                 option_list.add_option(Option(label))
                 self._index_map[option_idx] = len(self._items)
                 self._items.append(entry)
@@ -200,11 +207,11 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
     def _get_status_indicator(self, status: SessionStatus) -> str:
         """Get the status indicator for a session status."""
         indicators = {
-            SessionStatus.ACTIVE: "[green]◆[/green]",
-            SessionStatus.DETACHED: "[yellow]◆[/yellow]",
-            SessionStatus.IDLE: "[dim]◇[/dim]",
+            SessionStatus.ACTIVE: "[green]●[/green]",
+            SessionStatus.DETACHED: "[yellow]●[/yellow]",
+            SessionStatus.IDLE: "[dim]○[/dim]",
         }
-        return indicators.get(status, "[dim]◇[/dim]")
+        return indicators.get(status, "[dim]○[/dim]")
 
     def _fuzzy_match(self, query: str, target: str) -> bool:
         """Check if query fuzzy matches target."""

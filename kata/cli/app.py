@@ -690,6 +690,24 @@ _YELLOW = "\033[33m"
 _RESET = "\033[0m"
 
 
+def _get_current_tmux_session() -> str | None:
+    """Get the name of the current tmux session, if any."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#S"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
 def _build_switch_items(
     include_zoxide: bool = True,
     zoxide_limit: int = 50,
@@ -699,14 +717,33 @@ def _build_switch_items(
     Returns items formatted with ANSI colors and icons:
       - Cyan: registered Kata projects
       - Yellow: directories from zoxide
+
+    Projects are sorted by last opened (most recent first), with the
+    current tmux session pushed to second position so the previous
+    project is at the cursor for quick switching.
     """
+    from datetime import datetime
+
     registry = get_registry()
+    registry.reload()
     projects = registry.list_all()
 
     items: list[str] = []
 
-    # Add registered projects with icon (cyan)
-    for p in sorted(projects, key=lambda p: (p.group, p.name)):
+    # Sort by last opened (most recent first)
+    sorted_projects = sorted(projects, key=lambda p: (p.last_opened or datetime.min,), reverse=True)
+
+    # Move current session from first to second so the previous project
+    # is at the fzf cursor (Alt+Tab style switching)
+    current_session = _get_current_tmux_session()
+    if current_session and len(sorted_projects) >= 2:
+        for i, p in enumerate(sorted_projects):
+            if p.name == current_session or sanitize_session_name(p.name) == current_session:
+                sorted_projects.pop(i)
+                sorted_projects.insert(1, p)
+                break
+
+    for p in sorted_projects:
         items.append(f"{_CYAN}  {p.name}{_RESET}")
 
     # Add zoxide entries if enabled and available

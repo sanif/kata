@@ -73,11 +73,12 @@ pipx install kata-workspace --python python3.11
 pip install kata-workspace
 ```
 
-**Configure tmux keybinding** (Ctrl+Space for project switching):
+**Configure tmux keybindings** (Ctrl+Space for project switching, Ctrl+N for notifications):
 
 ```bash
 # Add to ~/.tmux.conf
 echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> ~/.tmux.conf
+echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"' >> ~/.tmux.conf
 
 # Reload tmux config
 tmux source ~/.tmux.conf
@@ -450,6 +451,7 @@ Launch with `kata` (no arguments).
 | `?` | Show help |
 | `k` | Quick kill session |
 | `d` | Quick delete project |
+| `n` | Open notification center |
 | `r` | Refresh status |
 | `q` | Quit dashboard |
 
@@ -498,8 +500,9 @@ When inside a Kata-managed tmux session:
 |-----|--------|
 | `Prefix + d` | Detach from session (returns to dashboard if loop mode enabled) |
 | `Ctrl+Space` | Open project switcher (fzf popup) |
+| `Ctrl+N` | Open notification center popup |
 
-`Prefix + d` is the standard tmux detach. `Ctrl+Space` is automatically configured when sessions are created.
+`Prefix + d` is the standard tmux detach. `Ctrl+Space` and `Ctrl+N` are configured during installation or via `kata notify-setup`.
 
 ---
 

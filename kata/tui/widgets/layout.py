@@ -229,7 +229,7 @@ def render_layout_summary(layout: LayoutInfo) -> str:
     for window in layout.windows:
         pane_count = len(window.panes)
         pane_text = "pane" if pane_count == 1 else "panes"
-        parts.append(f"[cyan]{window.name}[/cyan] ({pane_count} {pane_text})")
+        parts.append(f"[$primary]{window.name}[/$primary] ({pane_count} {pane_text})")
 
     return " → ".join(parts)
 
