@@ -14,8 +14,22 @@ DEFAULT_SOUNDS: dict[str, str] = {
     "session_limit": "error.mp3",
 }
 
+# Available sound packs — each pack has its own subdirectory
+# except "default" which uses the root sounds directory.
+AVAILABLE_SOUND_PACKS: dict[str, str] = {
+    "default": "Default",
+    "gentle": "Gentle",
+    "arcade": "Arcade",
+}
 
-def get_sound_path(filename: str) -> Path | None:
-    """Resolve a sound filename to its full path. Returns None if not found."""
-    path = SOUNDS_DIR / filename
+
+def get_sound_path(filename: str, pack: str = "default") -> Path | None:
+    """Resolve a sound filename to its full path for a given pack.
+
+    Returns None if not found.
+    """
+    if pack == "default":
+        path = SOUNDS_DIR / filename
+    else:
+        path = SOUNDS_DIR / pack / filename
     return path if path.exists() else None

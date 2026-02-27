@@ -15,6 +15,7 @@ from kata.core.settings import (
     get_settings,
     update_settings,
 )
+from kata.services.notifications.sounds import AVAILABLE_SOUND_PACKS
 from kata.services.registry import get_registry
 
 
@@ -108,6 +109,18 @@ class SettingsScreen(ModalScreen[None]):
         border: tall $primary;
     }
 
+    SettingsScreen #sound-pack-list {
+        width: 100%;
+        height: auto;
+        max-height: 5;
+        background: $surface;
+        border: tall $surface-lighten-1;
+    }
+
+    SettingsScreen #sound-pack-list:focus {
+        border: tall $primary;
+    }
+
     SettingsScreen #project-notif-list {
         width: 100%;
         height: auto;
@@ -168,6 +181,7 @@ class SettingsScreen(ModalScreen[None]):
             "group-input",
             "interval-input",
             "notif-switch",
+            "sound-pack-list",
             "project-notif-list",
             "theme-list",
             "close-btn",
@@ -237,6 +251,21 @@ class SettingsScreen(ModalScreen[None]):
                         "Enable desktop and sound notifications",
                         classes="setting-hint",
                     )
+
+                with Vertical(classes="setting-group"):
+                    yield Static("[bold]Sound Pack[/bold]", classes="setting-name")
+                    yield Static(
+                        "Choose notification sound style",
+                        classes="setting-hint",
+                    )
+                    pack_options = [
+                        Option(
+                            f"{'● ' if p == self._settings.notifications_sound_pack else '  '}{name}",
+                            id=p,
+                        )
+                        for p, name in AVAILABLE_SOUND_PACKS.items()
+                    ]
+                    yield OptionList(*pack_options, id="sound-pack-list")
 
                 with Vertical(classes="setting-group"):
                     yield Static("[bold]Per Project[/bold]", classes="setting-name")
@@ -351,6 +380,27 @@ class SettingsScreen(ModalScreen[None]):
         update_settings(notifications_enabled=event.value)
         self._settings = get_settings()
         self.post_message(self.SettingsChanged(self._settings))
+
+    @on(OptionList.OptionSelected, "#sound-pack-list")
+    def on_sound_pack_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle sound pack selection."""
+        if event.option.id and event.option.id != self._settings.notifications_sound_pack:
+            update_settings(notifications_sound_pack=event.option.id)
+            self._settings = get_settings()
+
+            # Update the list to show selection
+            try:
+                pack_list = self.query_one("#sound-pack-list", OptionList)
+                pack_list.clear_options()
+                for p, name in AVAILABLE_SOUND_PACKS.items():
+                    prefix = "● " if p == self._settings.notifications_sound_pack else "  "
+                    pack_list.add_option(Option(f"{prefix}{name}", id=p))
+            except Exception:
+                pass
+
+            pack_name = AVAILABLE_SOUND_PACKS.get(event.option.id, event.option.id)
+            self.app.notify(f"Sound pack: {pack_name}", title="Sounds")
+            self.post_message(self.SettingsChanged(self._settings))
 
     @on(Input.Changed, "#group-input")
     def on_group_changed(self, event: Input.Changed) -> None:

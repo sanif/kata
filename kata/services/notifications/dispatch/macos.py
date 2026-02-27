@@ -121,7 +121,11 @@ def send_macos_notification(notification: Notification) -> bool:
 
     # Play per-type sound
     if settings.notifications_sound_enabled:
-        sound_path = resolve_sound_path(notification.type.value, settings.notifications_sounds)
+        sound_path = resolve_sound_path(
+            notification.type.value,
+            settings.notifications_sounds,
+            pack=settings.notifications_sound_pack,
+        )
         if sound_path:
             play_sound(sound_path, settings.notifications_volume)
 

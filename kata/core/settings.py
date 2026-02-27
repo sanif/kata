@@ -52,6 +52,7 @@ class Settings:
 
     # Sound (new)
     notifications_sound_enabled: bool = True
+    notifications_sound_pack: str = "default"
     notifications_volume: float = 1.0
     notifications_sounds: dict[str, str] = field(default_factory=dict)
 
@@ -81,6 +82,10 @@ class Settings:
         self.notifications_suppression_seconds = max(
             0, min(300, self.notifications_suppression_seconds)
         )
+
+        # Sound pack validation
+        if self.notifications_sound_pack not in ("default", "gentle", "arcade"):
+            self.notifications_sound_pack = "default"
 
         # Volume: 0.0-1.0
         self.notifications_volume = max(0.0, min(1.0, self.notifications_volume))
@@ -118,6 +123,7 @@ class Settings:
             notifications_suppression_seconds=data.get("notifications_suppression_seconds", 5),
             notifications_terminal_app=data.get("notifications_terminal_app", "auto"),
             notifications_sound_enabled=data.get("notifications_sound_enabled", True),
+            notifications_sound_pack=data.get("notifications_sound_pack", "default"),
             notifications_volume=data.get("notifications_volume", 1.0),
             notifications_sounds=data.get("notifications_sounds", {}),
             notifications_suppress_question_after_task_seconds=data.get(

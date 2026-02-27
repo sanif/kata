@@ -10,20 +10,19 @@ from kata.services.notifications.dispatch.audio import (
 
 class TestVolumeConversion:
     def test_full_volume(self):
-        assert volume_to_afplay(1.0) == 255
+        assert volume_to_afplay(1.0) == 1.0
 
     def test_zero_volume(self):
-        assert volume_to_afplay(0.0) == 0
+        assert volume_to_afplay(0.0) == 0.0
 
     def test_half_volume(self):
-        result = volume_to_afplay(0.5)
-        assert 50 < result < 200
+        assert volume_to_afplay(0.5) == 0.5
 
     def test_clamps_above_one(self):
-        assert volume_to_afplay(5.0) == 255
+        assert volume_to_afplay(5.0) == 1.0
 
     def test_clamps_below_zero(self):
-        assert volume_to_afplay(-1.0) == 0
+        assert volume_to_afplay(-1.0) == 0.0
 
 
 class TestResolveSoundPath:
