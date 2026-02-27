@@ -28,11 +28,23 @@ TYPE_ICONS: dict[NotificationType, str] = {
     NotificationType.ROUTINE_COMPLETE: "◉",
 }
 
+# Short type labels for expanded view
+TYPE_LABELS: dict[NotificationType, str] = {
+    NotificationType.TASK_COMPLETE: "task",
+    NotificationType.QUESTION: "question",
+    NotificationType.PLAN_READY: "plan",
+    NotificationType.REVIEW_DONE: "review",
+    NotificationType.ERROR: "error",
+    NotificationType.SESSION_LIMIT: "limit",
+    NotificationType.ROUTINE_COMPLETE: "routine",
+}
+
 # Column widths
 _COL_NAME = 18
 _COL_COUNT = 8
 _COL_TIME = 6
 _COL_MSG = 36
+_MAX_BODY_LINES = 12
 
 
 def _time_ago(ts: datetime) -> str:
@@ -74,6 +86,19 @@ def _get_message(n: Notification) -> str:
     return title if isinstance(title, str) else str(title)
 
 
+def _get_body_lines(n: Notification) -> list[str]:
+    """Get all body lines for expanded view."""
+    body = getattr(n, "body", "") or ""
+    if not isinstance(body, str) or not body.strip():
+        return []
+    lines = body.strip().split("\n")
+    # Skip the first line (already shown in summary) and collect the rest
+    if len(lines) <= 1:
+        return []
+    remaining = [line.strip() for line in lines[1:] if line.strip()]
+    return remaining[:_MAX_BODY_LINES]
+
+
 def _load_grouped() -> dict[str, list[Notification]]:
     """Load notifications grouped by session using a fresh DB connection."""
     try:
@@ -98,12 +123,12 @@ class NotificationCenterModal(ModalScreen[str | None]):
     }
 
     NotificationCenterModal #nc-container {
-        width: 74;
-        max-width: 90%;
-        height: 24;
-        background: transparent;
-        border: round $primary 40%;
-        padding: 1 1;
+        width: 78;
+        max-width: 92%;
+        height: 28;
+        background: $surface;
+        border: round $surface-lighten-2;
+        padding: 1 2;
     }
 
     NotificationCenterModal #nc-header {
@@ -112,6 +137,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
         color: $text;
         background: transparent;
         padding: 0 1;
+        margin-bottom: 1;
     }
 
     NotificationCenterModal #nc-tree {
@@ -123,7 +149,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
     }
 
     NotificationCenterModal #nc-tree > .tree--cursor {
-        background: $surface-lighten-2;
+        background: $primary 15%;
     }
 
     NotificationCenterModal #nc-tree:focus > .tree--cursor {
@@ -132,7 +158,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
     NotificationCenterModal #nc-tree > .tree--guides,
     NotificationCenterModal #nc-tree > .tree--guides-hover {
-        color: transparent;
+        color: $surface-lighten-1;
     }
 
     NotificationCenterModal #nc-footer {
@@ -140,17 +166,18 @@ class NotificationCenterModal(ModalScreen[str | None]):
         height: 1;
         color: $text-muted;
         background: transparent;
+        margin-top: 1;
         padding: 0 1;
     }
     """
 
     BINDINGS = [
         Binding("escape", "cancel", "Close", show=False),
-        Binding("v", "toggle_expand", "View"),
-        Binding("d", "dismiss_selected", "Dismiss"),
-        Binding("shift+d", "dismiss_all", "Dismiss All"),
-        Binding("r", "mark_read", "Read"),
-        Binding("shift+r", "mark_all_read", "Read All"),
+        Binding("v", "toggle_expand", "View", priority=True),
+        Binding("d", "dismiss_selected", "Dismiss", priority=True),
+        Binding("shift+d", "dismiss_all", "Dismiss All", priority=True),
+        Binding("r", "mark_read", "Read", priority=True),
+        Binding("shift+r", "mark_all_read", "Read All", priority=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -175,13 +202,20 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
         # Count total unread across all projects
         total_unread = 0
+        total_count = 0
         for notifications in grouped.values():
+            total_count += len(notifications)
             total_unread += sum(1 for n in notifications if n.status == NotificationStatus.UNREAD)
 
         # Header
         try:
             header = self.query_one("#nc-header", Static)
-            count_text = f"  [$primary]{len(grouped)}[/$primary]" if grouped else ""
+            if total_unread > 0:
+                count_text = f"  [bold $primary]{total_unread} unread[/bold $primary]"
+            elif total_count > 0:
+                count_text = f"  [dim]{total_count} read[/dim]"
+            else:
+                count_text = ""
             header.update(f"[bold]󰂚 Notifications[/bold]{count_text}")
         except Exception:
             pass
@@ -191,7 +225,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
             footer = self.query_one("#nc-footer", Static)
             footer.update(
                 "[dim]enter[/dim] switch  "
-                "[dim]v[/dim] view  "
+                "[dim]v[/dim] expand  "
                 "[dim]d[/dim] dismiss  [dim]D[/dim] all  "
                 "[dim]r[/dim] read  [dim]R[/dim] all  "
                 "[dim]esc[/dim] close"
@@ -201,7 +235,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
         if not grouped:
             tree.root.add_leaf(
-                "[dim]  No notifications[/dim]",
+                "[dim]  No notifications yet[/dim]",
                 data={"type": "empty"},
             )
             return
@@ -219,14 +253,37 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
             for n in notifications:
                 child_label = self._build_notification_label(n)
-                project_node.add_leaf(
-                    child_label,
-                    data={
-                        "type": "notification",
-                        "notification_id": n.id,
-                        "session_name": session_name,
-                    },
-                )
+                body_lines = _get_body_lines(n)
+
+                if body_lines:
+                    # Expandable notification node with body lines as children
+                    notif_node = project_node.add(
+                        child_label,
+                        data={
+                            "type": "notification",
+                            "notification_id": n.id,
+                            "session_name": session_name,
+                        },
+                        expand=False,
+                    )
+                    for line in body_lines:
+                        escaped_line = _escape(line)
+                        if len(escaped_line) > 60:
+                            escaped_line = escaped_line[:59] + "…"
+                        notif_node.add_leaf(
+                            f"[dim]  {escaped_line}[/dim]",
+                            data={"type": "body_line", "session_name": session_name},
+                        )
+                else:
+                    # Leaf notification (no body to expand)
+                    project_node.add_leaf(
+                        child_label,
+                        data={
+                            "type": "notification",
+                            "notification_id": n.id,
+                            "session_name": session_name,
+                        },
+                    )
 
     def _build_project_label(self, name: str, unread: int, most_recent: datetime) -> str:
         """Build label for a project row."""
@@ -240,7 +297,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
             count_str = f"{unread} new"
             return (
                 f"[cyan]●[/cyan] "
-                f"{escaped_name:<{_COL_NAME}}  "
+                f"[bold]{escaped_name:<{_COL_NAME}}[/bold]  "
                 f"[cyan]{count_str:<{_COL_COUNT}}[/cyan] "
                 f"[dim]{time_str:>{_COL_TIME}}[/dim]"
             )
@@ -255,16 +312,22 @@ class NotificationCenterModal(ModalScreen[str | None]):
     def _build_notification_label(self, n: Notification) -> str:
         """Build label for a notification child row."""
         icon = TYPE_ICONS.get(n.type, "•")
+        type_label = TYPE_LABELS.get(n.type, "")
         message = _escape(_get_message(n)) or "Notification"
-        if len(message) > _COL_MSG:
-            message = message[: _COL_MSG - 1] + "…"
+
+        # Shorter message to make room for type label
+        max_msg = _COL_MSG - len(type_label) - 3 if type_label else _COL_MSG
+        if len(message) > max_msg:
+            message = message[: max_msg - 1] + "…"
         time_str = _time_ago(n.timestamp)
 
         is_unread = n.status == NotificationStatus.UNREAD
+        type_tag = f" [dim italic]{type_label}[/dim italic]" if type_label else ""
+
         if is_unread:
-            return f"{icon} {message:<{_COL_MSG}} [dim]{time_str:>{_COL_TIME}}[/dim]"
+            return f"{icon} {message}{type_tag}" f"  [dim]{time_str:>{_COL_TIME}}[/dim]"
         else:
-            return f"[dim]{icon} {message:<{_COL_MSG}} {time_str:>{_COL_TIME}}[/dim]"
+            return f"[dim]{icon} {message}{type_tag}  {time_str:>{_COL_TIME}}[/dim]"
 
     def _get_selected_data(self) -> dict[str, Any] | None:
         """Get data from the currently highlighted tree node."""
@@ -286,14 +349,25 @@ class NotificationCenterModal(ModalScreen[str | None]):
         self.dismiss(None)
 
     def action_toggle_expand(self) -> None:
-        """Toggle expand/collapse on project nodes."""
+        """Toggle expand/collapse on project or notification nodes."""
         try:
             tree = self.query_one("#nc-tree", Tree)
             node = tree.cursor_node
             if node is None or not node.data:
                 return
-            if node.data.get("type") == "project":
+
+            node_type = node.data.get("type")
+
+            if node_type == "project":
                 node.toggle()
+            elif node_type == "notification":
+                # Only toggle if the node has children (is expandable)
+                if node.children:
+                    node.toggle()
+            elif node_type == "body_line":
+                # Toggle the parent notification node
+                if node.parent and node.parent.data:
+                    node.parent.toggle()
         except Exception:
             pass
 
@@ -301,6 +375,12 @@ class NotificationCenterModal(ModalScreen[str | None]):
         """Handle Enter on any node — switch to session."""
         data = event.node.data
         if not data or data.get("type") == "empty":
+            return
+
+        # For body lines, don't switch — just collapse parent
+        if data.get("type") == "body_line":
+            if event.node.parent and event.node.parent.data:
+                event.node.parent.toggle()
             return
 
         session_name = data.get("session_name", "")
