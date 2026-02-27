@@ -23,6 +23,10 @@ AVAILABLE_THEMES = [
     "kata-warm",
     "kata-glass",
     "kata-glass-light",
+    "kata-rose",
+    "kata-nord",
+    "kata-mono",
+    "kata-ember",
 ]
 
 
@@ -58,6 +62,9 @@ class Settings:
 
     # Classification (new)
     notifications_subagent_stop: bool = False
+
+    # Per-project: list of project names with notifications disabled
+    notifications_disabled_projects: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate and clamp values."""
@@ -123,6 +130,7 @@ class Settings:
                 "notifications_suppress_duplicate_seconds", 5
             ),
             notifications_subagent_stop=data.get("notifications_subagent_stop", False),
+            notifications_disabled_projects=data.get("notifications_disabled_projects", []),
         )
 
 

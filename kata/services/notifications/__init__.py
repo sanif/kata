@@ -56,6 +56,10 @@ def notify(
     if not settings.notifications_enabled:
         return
 
+    # Per-project disable check
+    if session_name and session_name in settings.notifications_disabled_projects:
+        return
+
     notification = Notification(
         type=type,
         source=source,
@@ -69,9 +73,24 @@ def notify(
     # Try daemon first
     sent = send_notification_sync(notification)
     if not sent:
-        # Fallback: write directly to store
+        # Fallback: write directly to store with a fresh connection
+        # to avoid locking issues with long-lived processes (e.g., TUI)
         try:
-            store = get_notification_store()
-            store.add(notification)
+            store = NotificationStore()
+            try:
+                store.add(notification)
+            finally:
+                store.close()
         except Exception:
             logger.debug("Failed to store notification", exc_info=True)
+
+    # Dispatch OS-level notification (non-blocking, best-effort)
+    try:
+        import platform
+
+        if platform.system() == "Darwin":
+            from kata.services.notifications.dispatch.macos import send_macos_notification
+
+            send_macos_notification(notification)
+    except Exception:
+        logger.debug("Failed to send OS notification", exc_info=True)

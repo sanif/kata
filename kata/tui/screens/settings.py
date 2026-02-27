@@ -3,7 +3,7 @@
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static, Switch
@@ -15,6 +15,7 @@ from kata.core.settings import (
     get_settings,
     update_settings,
 )
+from kata.services.registry import get_registry
 
 
 class SettingsScreen(ModalScreen[None]):
@@ -26,71 +27,108 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     SettingsScreen #settings-container {
-        width: 65;
+        width: 60;
         height: auto;
-        max-height: 35;
+        max-height: 36;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
-        overflow-y: auto;
     }
 
     SettingsScreen #settings-title {
         text-style: bold;
-        color: $text;
-        margin-bottom: 2;
+        color: $primary;
+        margin-bottom: 1;
         text-align: center;
+        width: 100%;
     }
 
-    SettingsScreen .setting-row {
+    SettingsScreen #settings-scroll {
+        width: 100%;
+        height: auto;
+        max-height: 28;
+    }
+
+    SettingsScreen .section-label {
+        color: $text-muted;
+        text-style: bold;
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+
+    SettingsScreen .setting-group {
         width: 100%;
         height: auto;
         margin-bottom: 1;
+        padding: 0 1;
     }
 
-    SettingsScreen .setting-label {
-        width: 20;
-        height: 3;
+    SettingsScreen .setting-name {
+        width: 100%;
+        height: 1;
+        color: $text;
+    }
+
+    SettingsScreen .setting-hint {
+        width: 100%;
+        height: 1;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    SettingsScreen .toggle-row {
+        width: 100%;
+        height: auto;
+        align: left middle;
+    }
+
+    SettingsScreen .toggle-row .setting-name {
+        width: 1fr;
         content-align: left middle;
     }
 
-    SettingsScreen .setting-control {
-        width: 1fr;
-        height: 3;
+    SettingsScreen Switch {
+        margin-bottom: 0;
     }
 
-    SettingsScreen .setting-description {
-        color: $text-muted;
-        margin-left: 20;
-        margin-bottom: 1;
+    SettingsScreen Input {
+        width: 100%;
+        max-width: 40;
     }
 
     SettingsScreen #theme-list {
+        width: 100%;
+        height: auto;
+        max-height: 10;
+        background: $surface;
+        border: tall $surface-lighten-1;
+    }
+
+    SettingsScreen #theme-list:focus {
+        border: tall $primary;
+    }
+
+    SettingsScreen #project-notif-list {
+        width: 100%;
         height: auto;
         max-height: 8;
-        margin-left: 2;
-        margin-bottom: 1;
         background: $surface;
+        border: tall $surface-lighten-1;
     }
 
-    SettingsScreen #interval-input {
-        width: 10;
-    }
-
-    SettingsScreen #group-input {
-        width: 30;
+    SettingsScreen #project-notif-list:focus {
+        border: tall $primary;
     }
 
     SettingsScreen #settings-footer {
         width: 100%;
         height: auto;
         margin-top: 1;
-        align: right middle;
+        content-align: center middle;
     }
 
-    SettingsScreen .restart-notice {
-        color: $warning;
-        text-style: italic;
+    SettingsScreen #close-btn {
+        width: auto;
     }
     """
 
@@ -111,6 +149,12 @@ class SettingsScreen(ModalScreen[None]):
         "kata-light": "Kata Light",
         "kata-ocean": "Kata Ocean",
         "kata-warm": "Kata Warm",
+        "kata-glass": "Kata Glass",
+        "kata-glass-light": "Kata Glass Light",
+        "kata-rose": "Kata Rose",
+        "kata-nord": "Kata Nord",
+        "kata-mono": "Kata Mono",
+        "kata-ember": "Kata Ember",
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -118,6 +162,16 @@ class SettingsScreen(ModalScreen[None]):
         super().__init__(*args, **kwargs)
         self._settings = get_settings()
         self._theme_changed = False
+        self._projects: list[str] = []
+        self._focusable_ids = [
+            "loop-switch",
+            "group-input",
+            "interval-input",
+            "notif-switch",
+            "project-notif-list",
+            "theme-list",
+            "close-btn",
+        ]
 
     def _format_theme_name(self, theme_id: str) -> str:
         """Format theme ID to display name."""
@@ -125,78 +179,176 @@ class SettingsScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         """Compose the settings screen."""
-        with Container(id="settings-container"):
-            yield Static("Settings", id="settings-title")
+        # Load project names for per-project list
+        registry = get_registry()
+        self._projects = sorted([p.name for p in registry.list_all()])
 
-            # Loop Mode Toggle
-            with Horizontal(classes="setting-row"):
-                yield Static("Loop Mode:", classes="setting-label")
-                yield Switch(
-                    value=self._settings.loop_enabled,
-                    id="loop-switch",
-                    classes="setting-control",
-                )
-            yield Static(
-                "Auto-launch dashboard after session exits",
-                classes="setting-description",
-            )
+        with Vertical(id="settings-container"):
+            yield Static("󰒓 Settings", id="settings-title")
 
-            # Default Group Input
-            with Horizontal(classes="setting-row"):
-                yield Static("Default Group:", classes="setting-label")
-                yield Input(
-                    value=self._settings.default_group,
-                    placeholder="Group name...",
-                    id="group-input",
-                    classes="setting-control",
-                )
-            yield Static(
-                "Group for new projects without explicit group",
-                classes="setting-description",
-            )
+            with VerticalScroll(id="settings-scroll"):
+                # -- General --
+                yield Static("[dim]General[/dim]", classes="section-label")
 
-            # Refresh Interval Input
-            with Horizontal(classes="setting-row"):
-                yield Static("Refresh (sec):", classes="setting-label")
-                yield Input(
-                    value=str(self._settings.refresh_interval),
-                    placeholder="1-60",
-                    id="interval-input",
-                    classes="setting-control",
-                )
-            yield Static(
-                "Status refresh interval (1-60 seconds)",
-                classes="setting-description",
-            )
+                with Vertical(classes="setting-group"):
+                    with Horizontal(classes="toggle-row"):
+                        yield Static("[bold]Loop Mode[/bold]", classes="setting-name")
+                        yield Switch(value=self._settings.loop_enabled, id="loop-switch")
+                    yield Static(
+                        "Auto-launch dashboard after session exits",
+                        classes="setting-hint",
+                    )
 
-            # Theme Selector
-            yield Static("Theme:", classes="setting-label")
-            theme_options = [
-                Option(
-                    f"{'● ' if t == self._settings.theme else '  '}{self._format_theme_name(t)}",
-                    id=t,
-                )
-                for t in AVAILABLE_THEMES
-            ]
-            yield OptionList(*theme_options, id="theme-list")
-            yield Static(
-                "Select a theme for the interface",
-                classes="setting-description",
-                id="theme-notice",
-            )
+                with Vertical(classes="setting-group"):
+                    yield Static("[bold]Default Group[/bold]", classes="setting-name")
+                    yield Static(
+                        "Group for new projects without explicit group",
+                        classes="setting-hint",
+                    )
+                    yield Input(
+                        value=self._settings.default_group,
+                        placeholder="Group name...",
+                        id="group-input",
+                    )
 
-            # Footer with close button
-            with Horizontal(id="settings-footer"):
+                with Vertical(classes="setting-group"):
+                    yield Static("[bold]Refresh Interval[/bold]", classes="setting-name")
+                    yield Static(
+                        "Status refresh interval in seconds (1-60)",
+                        classes="setting-hint",
+                    )
+                    yield Input(
+                        value=str(self._settings.refresh_interval),
+                        placeholder="1-60",
+                        id="interval-input",
+                    )
+
+                # -- Notifications --
+                yield Static("[dim]Notifications[/dim]", classes="section-label")
+
+                with Vertical(classes="setting-group"):
+                    with Horizontal(classes="toggle-row"):
+                        yield Static("[bold]Notifications[/bold]", classes="setting-name")
+                        yield Switch(
+                            value=self._settings.notifications_enabled,
+                            id="notif-switch",
+                        )
+                    yield Static(
+                        "Enable desktop and sound notifications",
+                        classes="setting-hint",
+                    )
+
+                with Vertical(classes="setting-group"):
+                    yield Static("[bold]Per Project[/bold]", classes="setting-name")
+                    yield Static(
+                        "Toggle notifications per project (Enter to toggle)",
+                        classes="setting-hint",
+                    )
+                    disabled = set(self._settings.notifications_disabled_projects)
+                    options = [
+                        Option(
+                            f"{'[green]●[/green]' if name not in disabled else '[dim]○[/dim]'}  {name}",
+                            id=name,
+                        )
+                        for name in self._projects
+                    ]
+                    yield OptionList(*options, id="project-notif-list")
+
+                # -- Appearance --
+                yield Static("[dim]Appearance[/dim]", classes="section-label")
+
+                with Vertical(classes="setting-group"):
+                    yield Static("[bold]Theme[/bold]", classes="setting-name")
+                    yield Static(
+                        "Select a theme for the interface",
+                        classes="setting-hint",
+                    )
+                    theme_options = [
+                        Option(
+                            f"{'● ' if t == self._settings.theme else '  '}{self._format_theme_name(t)}",
+                            id=t,
+                        )
+                        for t in AVAILABLE_THEMES
+                    ]
+                    yield OptionList(*theme_options, id="theme-list")
+
+            with Vertical(id="settings-footer"):
                 yield Button("Close", variant="primary", id="close-btn")
 
     def on_mount(self) -> None:
-        """Focus first input on mount."""
-        pass  # Let user navigate naturally
+        """Focus first interactive widget on mount."""
+        try:
+            self.query_one("#loop-switch", Switch).focus()
+        except Exception:
+            pass
+
+    def on_descendant_focus(self, event) -> None:
+        """Auto-scroll to keep focused widget visible (Tab, arrow, click)."""
+        try:
+            event.widget.scroll_visible()
+        except Exception:
+            pass
+
+    def on_key(self, event) -> None:
+        """Handle arrow key navigation between settings."""
+        if event.key in ("up", "down"):
+            focused = self.focused
+            if focused is None:
+                return
+
+            # Don't intercept arrows inside OptionList (let it scroll items)
+            if isinstance(focused, OptionList):
+                return
+
+            if not isinstance(focused, Input | Switch | Button):
+                return
+
+            current_id = focused.id
+            if current_id not in self._focusable_ids:
+                return
+
+            idx = self._focusable_ids.index(current_id)
+            if event.key == "up" and idx > 0:
+                next_id = self._focusable_ids[idx - 1]
+                event.prevent_default()
+                self._focus_widget(next_id)
+            elif event.key == "down" and idx < len(self._focusable_ids) - 1:
+                next_id = self._focusable_ids[idx + 1]
+                event.prevent_default()
+                self._focus_widget(next_id)
+
+    def _focus_widget(self, widget_id: str) -> None:
+        """Focus a widget by ID and scroll it into view."""
+        try:
+            widget = self.query_one(f"#{widget_id}")
+            widget.focus()
+            widget.scroll_visible()
+        except Exception:
+            pass
+
+    def _refresh_project_notif_list(self) -> None:
+        """Refresh the per-project notification list to reflect current state."""
+        try:
+            option_list = self.query_one("#project-notif-list", OptionList)
+            disabled = set(self._settings.notifications_disabled_projects)
+            option_list.clear_options()
+            for name in self._projects:
+                indicator = "[green]●[/green]" if name not in disabled else "[dim]○[/dim]"
+                option_list.add_option(Option(f"{indicator}  {name}", id=name))
+        except Exception:
+            pass
 
     @on(Switch.Changed, "#loop-switch")
     def on_loop_changed(self, event: Switch.Changed) -> None:
         """Handle loop mode toggle."""
         update_settings(loop_enabled=event.value)
+        self._settings = get_settings()
+        self.post_message(self.SettingsChanged(self._settings))
+
+    @on(Switch.Changed, "#notif-switch")
+    def on_notif_changed(self, event: Switch.Changed) -> None:
+        """Handle global notifications toggle."""
+        update_settings(notifications_enabled=event.value)
         self._settings = get_settings()
         self.post_message(self.SettingsChanged(self._settings))
 
@@ -214,13 +366,30 @@ class SettingsScreen(ModalScreen[None]):
         """Handle refresh interval change."""
         try:
             value = int(event.value.strip())
-            # Clamp to valid range
             value = max(1, min(60, value))
             update_settings(refresh_interval=value)
             self._settings = get_settings()
             self.post_message(self.SettingsChanged(self._settings))
         except ValueError:
-            pass  # Ignore invalid input while typing
+            pass
+
+    @on(OptionList.OptionSelected, "#project-notif-list")
+    def on_project_notif_toggled(self, event: OptionList.OptionSelected) -> None:
+        """Toggle per-project notification on Enter."""
+        project_name = event.option.id
+        if not project_name:
+            return
+
+        disabled = list(self._settings.notifications_disabled_projects)
+        if project_name in disabled:
+            disabled.remove(project_name)
+        else:
+            disabled.append(project_name)
+
+        update_settings(notifications_disabled_projects=disabled)
+        self._settings = get_settings()
+        self._refresh_project_notif_list()
+        self.post_message(self.SettingsChanged(self._settings))
 
     @on(OptionList.OptionSelected, "#theme-list")
     def on_theme_selected(self, event: OptionList.OptionSelected) -> None:

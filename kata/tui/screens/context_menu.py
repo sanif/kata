@@ -13,6 +13,7 @@ from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from kata.core.models import Project
+from kata.core.settings import get_settings, update_settings
 from kata.services.registry import get_registry
 from kata.services.sessions import (
     SessionError,
@@ -34,6 +35,7 @@ class MenuAction(Enum):
     OPEN_TERMINAL = auto()
     SAVE_LAYOUT = auto()
     SET_SHORTCUT = auto()
+    TOGGLE_NOTIFICATIONS = auto()
 
 
 class ContextMenuScreen(ModalScreen[str | None]):
@@ -47,9 +49,9 @@ class ContextMenuScreen(ModalScreen[str | None]):
     ContextMenuScreen #menu-container {
         width: 40;
         height: auto;
-        max-height: 16;
+        max-height: 18;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -76,7 +78,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
     }
 
     ContextMenuScreen #menu-list > .option-list--option-highlighted {
-        background: $surface-lighten-1;
+        background: $primary 20%;
         color: $text;
     }
     """
@@ -90,6 +92,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("t", "open_terminal", "Open Terminal", show=False),
         Binding("l", "save_layout", "Save Layout", show=False),
         Binding("s", "set_shortcut", "Set Shortcut", show=False),
+        Binding("n", "toggle_notifications", "Toggle Notifications", show=False),
     ]
 
     # Allow pre-selecting an action when opening
@@ -115,22 +118,31 @@ class ContextMenuScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         """Compose the context menu."""
         with Container(id="menu-container"):
-            yield Static("Project Actions", id="menu-title")
+            yield Static("󰍜 Actions", id="menu-title")
             yield Static(f"[dim]{self.project.name}[/dim]", id="menu-subtitle")
 
             # Show current shortcut if set
-            shortcut_label = "(s) Set Shortcut"
+            shortcut_label = "[dim]s[/dim]  󰖟 Set Shortcut"
             if self.project.shortcut:
-                shortcut_label = f"(s) Set Shortcut [dim](current: {self.project.shortcut})[/dim]"
+                shortcut_label = (
+                    f"[dim]s[/dim]  󰖟 Set Shortcut [dim]({self.project.shortcut})[/dim]"
+                )
+
+            # Notification status for this project
+            settings = get_settings()
+            notif_disabled = self.project.name in settings.notifications_disabled_projects
+            notif_indicator = "[dim]○[/dim]" if notif_disabled else "[green]●[/green]"
+            notif_label = f"[dim]n[/dim]  {notif_indicator} Notifications"
 
             options = [
-                Option("(k) Kill Session", id="kill"),
-                Option("(d) Delete Project", id="delete"),
-                Option("(r) Rename Project", id="rename"),
-                Option("(g) Move to Group", id="move_group"),
-                Option("(t) Open in Terminal", id="open_terminal"),
-                Option("(l) Save Layout", id="save_layout"),
+                Option("[dim]k[/dim]  󰅖 Kill Session", id="kill"),
+                Option("[dim]d[/dim]  󰆴 Delete Project", id="delete"),
+                Option("[dim]r[/dim]  󰑕 Rename", id="rename"),
+                Option("[dim]g[/dim]  󰉋 Move to Group", id="move_group"),
+                Option("[dim]t[/dim]  󰆍 Open in Terminal", id="open_terminal"),
+                Option("[dim]l[/dim]  󰈙 Save Layout", id="save_layout"),
                 Option(shortcut_label, id="set_shortcut"),
+                Option(notif_label, id="toggle_notifications"),
             ]
             yield OptionList(*options, id="menu-list")
 
@@ -146,6 +158,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 MenuAction.OPEN_TERMINAL: 4,
                 MenuAction.SAVE_LAYOUT: 5,
                 MenuAction.SET_SHORTCUT: 6,
+                MenuAction.TOGGLE_NOTIFICATIONS: 7,
             }
             index = action_to_index.get(self.preselected_action, 0)
             try:
@@ -172,6 +185,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_save_layout()
         elif self.preselected_action == MenuAction.SET_SHORTCUT:
             self.action_set_shortcut()
+        elif self.preselected_action == MenuAction.TOGGLE_NOTIFICATIONS:
+            self.action_toggle_notifications()
 
     @on(OptionList.OptionSelected)
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -191,6 +206,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_save_layout()
         elif option_id == "set_shortcut":
             self.action_set_shortcut()
+        elif option_id == "toggle_notifications":
+            self.action_toggle_notifications()
 
     def action_cancel(self) -> None:
         """Cancel and close the menu."""
@@ -425,6 +442,23 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self._on_shortcut_selected,
         )
 
+    def action_toggle_notifications(self) -> None:
+        """Toggle notifications for this project."""
+        settings = get_settings()
+        disabled = list(settings.notifications_disabled_projects)
+        project_name = self.project.name
+
+        if project_name in disabled:
+            disabled.remove(project_name)
+            update_settings(notifications_disabled_projects=disabled)
+            self.app.notify(f"Notifications enabled for {project_name}", title="Notifications")
+        else:
+            disabled.append(project_name)
+            update_settings(notifications_disabled_projects=disabled)
+            self.app.notify(f"Notifications disabled for {project_name}", title="Notifications")
+
+        self.dismiss("notifications_toggled")
+
     def _on_shortcut_selected(self, shortcut: int | None) -> None:
         """Handle shortcut selection."""
         # None means cancelled, -1 means clear shortcut
@@ -472,7 +506,7 @@ class ConfirmDialog(ModalScreen[bool]):
         width: 40;
         height: auto;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -493,7 +527,7 @@ class ConfirmDialog(ModalScreen[bool]):
     }
 
     ConfirmDialog #options > .option-list--option-highlighted {
-        background: $surface-lighten-1;
+        background: $primary 20%;
     }
     """
 
@@ -554,7 +588,7 @@ class InputDialog(ModalScreen[str | None]):
         width: 60;
         height: auto;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -652,7 +686,7 @@ class GroupSelectorDialog(ModalScreen[str | None]):
         height: auto;
         max-height: 20;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -756,7 +790,7 @@ class ShortcutSelectorDialog(ModalScreen[int | None]):
         width: 40;
         height: auto;
         background: $surface;
-        border: solid $surface-lighten-1;
+        border: round $surface-lighten-2;
         padding: 1 2;
     }
 
@@ -778,7 +812,7 @@ class ShortcutSelectorDialog(ModalScreen[int | None]):
     }
 
     ShortcutSelectorDialog #shortcut-list > .option-list--option-highlighted {
-        background: $surface-lighten-1;
+        background: $primary 20%;
     }
     """
 
