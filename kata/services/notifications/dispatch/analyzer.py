@@ -15,10 +15,38 @@ from kata.services.notifications.models import NotificationType
 
 logger = logging.getLogger(__name__)
 
-ACTIVE_TOOLS = frozenset({"Write", "Edit", "Bash", "NotebookEdit", "SlashCommand", "KillShell"})
-QUESTION_TOOLS = frozenset({"AskUserQuestion"})
+ACTIVE_TOOLS = frozenset(
+    {
+        "Write",
+        "Edit",
+        "Bash",
+        "NotebookEdit",
+        "SlashCommand",
+        "KillShell",
+        "write_file",
+        "replace",
+        "run_shell_command",
+    }
+)
+QUESTION_TOOLS = frozenset({"AskUserQuestion", "ask_user"})
 PLANNING_TOOLS = frozenset({"ExitPlanMode", "TodoWrite"})
-PASSIVE_TOOLS = frozenset({"Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task"})
+PASSIVE_TOOLS = frozenset(
+    {
+        "Read",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "WebSearch",
+        "Task",
+        "read_file",
+        "list_directory",
+        "grep_search",
+        "glob",
+        "web_fetch",
+        "google_web_search",
+        "codebase_investigator",
+    }
+)
 
 _SESSION_LIMIT_PATTERN = re.compile(r"session.?limit", re.IGNORECASE)
 _MAX_ASSISTANT_MESSAGES = 15

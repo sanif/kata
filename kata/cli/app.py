@@ -1149,16 +1149,51 @@ def notify_popup() -> None:
 @app.command("notify-hook", hidden=True)
 def notify_hook(
     event_type: str = typer.Argument(
-        help="Hook event type: stop, subagent-stop, pre-tool-use, notification"
+        help="Hook event type: stop, subagent-stop, pre-tool-use, notification (Claude); after-agent, before-tool, notification, session-end (Gemini)"
     ),
 ) -> None:
-    """Handle Claude Code hook events. Reads JSON from stdin."""
+    """Handle Claude Code or Gemini CLI hook events. Reads JSON from stdin."""
     import sys
 
-    from kata.services.notifications.hooks.claude_code import handle_hook_event
-
     stdin_data = sys.stdin.read()
-    handle_hook_event(event_type, stdin_data)
+
+    # Gemini event types use hyphens; Claude uses hyphens too in notify-hook
+    if event_type in ("after-agent", "before-tool", "session-end"):
+        from kata.services.notifications.hooks.gemini import handle_hook_event as handle_gemini
+
+        handle_gemini(event_type, stdin_data)
+    elif event_type == "notification":
+        # Can be either, but let's check for Gemini fields
+        import json
+
+        try:
+            data = json.loads(stdin_data)
+            if "hook_event_name" in data:
+                from kata.services.notifications.hooks.gemini import (
+                    handle_hook_event as handle_gemini,
+                )
+
+                handle_gemini(event_type, stdin_data)
+            else:
+                from kata.services.notifications.hooks.claude_code import (
+                    handle_hook_event as handle_claude,
+                )
+
+                handle_claude(event_type, stdin_data)
+        except Exception:
+            # Fallback to Claude
+            from kata.services.notifications.hooks.claude_code import (
+                handle_hook_event as handle_claude,
+            )
+
+            handle_claude(event_type, stdin_data)
+    else:
+        # stop, subagent-stop, pre-tool-use
+        from kata.services.notifications.hooks.claude_code import (
+            handle_hook_event as handle_claude,
+        )
+
+        handle_claude(event_type, stdin_data)
 
 
 @app.command("notify-claude-stop", hidden=True, deprecated=True)
@@ -1185,17 +1220,31 @@ def notify_tmux_event(
 
 @app.command("notify-setup")
 def notify_setup() -> None:
-    """Set up Claude Code hooks and tmux keybinding for Kata notifications."""
+    """Set up Claude Code & Gemini hooks and tmux keybinding for Kata notifications."""
     import subprocess
 
-    from kata.services.notifications.hooks.claude_code import setup_hooks
+    from kata.services.notifications.hooks.claude_code import setup_hooks as setup_claude
+    from kata.services.notifications.hooks.gemini import setup_hooks as setup_gemini
 
-    setup_hooks()
-    console.print(
-        "[green]✓[/green] Claude Code hooks configured (Stop, SubagentStop, PreToolUse, Notification)."
-    )
+    # 1. Claude Code hooks
+    try:
+        setup_claude()
+        console.print(
+            "[green]✓[/green] Claude Code hooks configured (Stop, SubagentStop, PreToolUse, Notification)."
+        )
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Could not configure Claude Code hooks: {e}")
 
-    # Set up tmux keybinding: C-n → notification popup
+    # 2. Gemini CLI hooks
+    try:
+        setup_gemini()
+        console.print(
+            "[green]✓[/green] Gemini CLI hooks configured (AfterAgent, BeforeTool, Notification, SessionEnd)."
+        )
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Could not configure Gemini CLI hooks: {e}")
+
+    # 3. Tmux keybinding: C-n → notification popup
     tmux_line = 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
     try:
         # Set in running tmux server
