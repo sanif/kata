@@ -1,88 +1,331 @@
-"""Tests for Claude Code hook handler."""
+"""Tests for rewritten Claude Code hook handler."""
 
 import json
+from unittest.mock import MagicMock, patch
 
-from kata.services.notifications.hooks.claude_code import (
-    classify_event,
-    parse_transcript,
-)
+from kata.services.notifications.hooks.claude_code import handle_hook_event
 from kata.services.notifications.models import NotificationType
 
 
-class TestClassifyEvent:
-    """Test event classification from transcript content."""
+class TestHandleHookEvent:
+    """Tests for the main dispatch pipeline."""
 
-    def test_question_detection(self):
-        messages = [
-            {"role": "assistant", "content": "What framework should I use for this?"},
-        ]
-        assert classify_event(messages, []) == NotificationType.QUESTION
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_disabled_notifications_returns_early(self, mock_settings):
+        mock_settings.return_value = MagicMock(notifications_enabled=False)
+        # Should not raise — just returns
+        handle_hook_event("stop", "{}")
 
-    def test_session_limit_detection(self):
-        messages = [
-            {"role": "assistant", "content": "Session limit reached. Please start a new session."},
-        ]
-        assert classify_event(messages, []) == NotificationType.SESSION_LIMIT
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_invalid_json_returns_early(self, mock_settings):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
+        handle_hook_event("stop", "not json")
 
-    def test_error_detection(self):
-        messages = [
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_empty_stdin_returns_early(self, mock_settings):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
+        handle_hook_event("stop", "  ")
+
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_subagent_stop_disabled(self, mock_settings):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=False,
+        )
+        handle_hook_event("subagent-stop", json.dumps({"session_id": "s1"}))
+
+    @patch("kata.services.notifications.hooks.claude_code.update_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.notify")
+    @patch("kata.services.notifications.hooks.claude_code.generate_summary")
+    @patch("kata.services.notifications.hooks.claude_code.get_git_branch")
+    @patch("kata.services.notifications.hooks.claude_code._resolve_session_name")
+    @patch("kata.services.notifications.hooks.claude_code.load_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.is_suppressed")
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.analyze_transcript")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_stop_full_pipeline(
+        self,
+        mock_settings,
+        mock_analyze,
+        mock_dedup_early,
+        mock_lock,
+        mock_suppressed,
+        mock_load_state,
+        mock_resolve,
+        mock_branch,
+        mock_summary,
+        mock_notify,
+        mock_update_state,
+    ):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+            notifications_suppress_duplicate_seconds=5,
+            notifications_suppress_question_after_task_seconds=12,
+            notifications_suppress_question_after_any_seconds=12,
+        )
+        mock_dedup_early.return_value = False
+        mock_analyze.return_value = NotificationType.TASK_COMPLETE
+        mock_lock.return_value = True
+        mock_suppressed.return_value = False
+        mock_load_state.return_value = MagicMock()
+        mock_resolve.return_value = "my-project"
+        mock_branch.return_value = "main"
+        mock_summary.return_value = "Fixed the bug"
+
+        stdin = json.dumps(
             {
-                "role": "assistant",
-                "content": "I encountered an API error: rate limit exceeded (429).",
-            },
-        ]
-        assert classify_event(messages, []) == NotificationType.ERROR
+                "session_id": "sess1",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "cwd": "/home/user/project",
+                "last_assistant_message": "I fixed the bug",
+            }
+        )
+        handle_hook_event("stop", stdin)
 
-    def test_plan_ready_detection(self):
-        messages = [
-            {"role": "assistant", "content": "The plan is ready for your review."},
-        ]
-        tools = [{"name": "ExitPlanMode"}]
-        assert classify_event(messages, tools) == NotificationType.PLAN_READY
+        mock_analyze.assert_called_once()
+        mock_notify.assert_called_once()
+        call_kwargs = mock_notify.call_args
+        assert call_kwargs.kwargs["type"] == NotificationType.TASK_COMPLETE
+        assert call_kwargs.kwargs["session_name"] == "my-project"
+        mock_update_state.assert_called_once_with("sess1", NotificationType.TASK_COMPLETE)
 
-    def test_task_complete_with_tools(self):
-        messages = [
-            {"role": "assistant", "content": "I've implemented the feature. The tests all pass."},
-        ]
-        tools = [{"name": "Write"}, {"name": "Bash"}]
-        assert classify_event(messages, tools) == NotificationType.TASK_COMPLETE
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_dedup_early_blocks(self, mock_settings, mock_dedup_early, mock_lock):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+        )
+        mock_dedup_early.return_value = True
 
-    def test_task_complete_default(self):
-        messages = [
-            {
-                "role": "assistant",
-                "content": "Done! I've finished implementing everything you asked for.",
-            },
-        ]
-        assert classify_event(messages, []) == NotificationType.TASK_COMPLETE
+        handle_hook_event("stop", json.dumps({"session_id": "s1"}))
+        mock_lock.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
+    @patch("kata.services.notifications.hooks.claude_code.is_suppressed")
+    @patch("kata.services.notifications.hooks.claude_code.load_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_lock_failure_blocks(
+        self,
+        mock_settings,
+        mock_dedup_early,
+        mock_lock,
+        mock_load_state,
+        mock_suppressed,
+        mock_notify,
+    ):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+        )
+        mock_dedup_early.return_value = False
+        mock_lock.return_value = False
 
-class TestParseTranscript:
-    """Test JSONL transcript parsing."""
-
-    def test_parse_valid_transcript(self, tmp_path):
-        transcript = tmp_path / "transcript.jsonl"
-        lines = [
-            json.dumps({"type": "human", "message": {"content": "Fix the bug"}}),
-            json.dumps({"type": "assistant", "message": {"content": "I'll fix it."}}),
+        handle_hook_event(
+            "stop",
             json.dumps(
                 {
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            {"type": "tool_use", "name": "Edit"},
-                            {"type": "text", "text": "Done fixing."},
-                        ]
-                    },
+                    "session_id": "s1",
+                    "transcript_path": "/tmp/t.jsonl",
                 }
             ),
-        ]
-        transcript.write_text("\n".join(lines))
-        messages, tools = parse_transcript(str(transcript))
-        assert len(messages) >= 1
-        assert any(t["name"] == "Edit" for t in tools)
+        )
+        mock_notify.assert_not_called()
 
-    def test_parse_missing_file(self):
-        messages, tools = parse_transcript("/nonexistent/path.jsonl")
-        assert messages == []
-        assert tools == []
+    @patch("kata.services.notifications.hooks.claude_code.notify")
+    @patch("kata.services.notifications.hooks.claude_code.is_suppressed")
+    @patch("kata.services.notifications.hooks.claude_code.load_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.analyze_transcript")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_suppression_blocks(
+        self,
+        mock_settings,
+        mock_analyze,
+        mock_dedup_early,
+        mock_lock,
+        mock_load_state,
+        mock_suppressed,
+        mock_notify,
+    ):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+            notifications_suppress_duplicate_seconds=5,
+            notifications_suppress_question_after_task_seconds=12,
+            notifications_suppress_question_after_any_seconds=12,
+        )
+        mock_dedup_early.return_value = False
+        mock_analyze.return_value = NotificationType.TASK_COMPLETE
+        mock_lock.return_value = True
+        mock_load_state.return_value = MagicMock()
+        mock_suppressed.return_value = True
+
+        handle_hook_event(
+            "stop",
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "transcript_path": "/tmp/t.jsonl",
+                }
+            ),
+        )
+        mock_notify.assert_not_called()
+
+
+class TestPreToolUseClassification:
+    """Tests for pre-tool-use event classification."""
+
+    @patch("kata.services.notifications.hooks.claude_code.update_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.notify")
+    @patch("kata.services.notifications.hooks.claude_code.generate_summary")
+    @patch("kata.services.notifications.hooks.claude_code.get_git_branch")
+    @patch("kata.services.notifications.hooks.claude_code._resolve_session_name")
+    @patch("kata.services.notifications.hooks.claude_code.load_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.is_suppressed")
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_exit_plan_mode_classifies_as_plan_ready(
+        self,
+        mock_settings,
+        mock_dedup_early,
+        mock_lock,
+        mock_suppressed,
+        mock_load_state,
+        mock_resolve,
+        mock_branch,
+        mock_summary,
+        mock_notify,
+        mock_update_state,
+    ):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+            notifications_suppress_duplicate_seconds=5,
+            notifications_suppress_question_after_task_seconds=12,
+            notifications_suppress_question_after_any_seconds=12,
+        )
+        mock_dedup_early.return_value = False
+        mock_lock.return_value = True
+        mock_suppressed.return_value = False
+        mock_load_state.return_value = MagicMock()
+        mock_resolve.return_value = "proj"
+        mock_branch.return_value = ""
+        mock_summary.return_value = ""
+
+        stdin = json.dumps(
+            {
+                "session_id": "s1",
+                "tool_name": "ExitPlanMode",
+            }
+        )
+        handle_hook_event("pre-tool-use", stdin)
+
+        call_kwargs = mock_notify.call_args.kwargs
+        assert call_kwargs["type"] == NotificationType.PLAN_READY
+
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_irrelevant_tool_skipped(self, mock_settings, mock_dedup_early):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+        )
+        mock_dedup_early.return_value = False
+
+        stdin = json.dumps(
+            {
+                "session_id": "s1",
+                "tool_name": "Read",
+            }
+        )
+        handle_hook_event("pre-tool-use", stdin)
+
+    @patch("kata.services.notifications.hooks.claude_code.update_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.notify")
+    @patch("kata.services.notifications.hooks.claude_code.generate_summary")
+    @patch("kata.services.notifications.hooks.claude_code.get_git_branch")
+    @patch("kata.services.notifications.hooks.claude_code._resolve_session_name")
+    @patch("kata.services.notifications.hooks.claude_code.load_session_state")
+    @patch("kata.services.notifications.hooks.claude_code.is_suppressed")
+    @patch("kata.services.notifications.hooks.claude_code.acquire_lock")
+    @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.claude_code.get_settings")
+    def test_ask_user_question_classifies_as_question(
+        self,
+        mock_settings,
+        mock_dedup_early,
+        mock_lock,
+        mock_suppressed,
+        mock_load_state,
+        mock_resolve,
+        mock_branch,
+        mock_summary,
+        mock_notify,
+        mock_update_state,
+    ):
+        mock_settings.return_value = MagicMock(
+            notifications_enabled=True,
+            notifications_subagent_stop=True,
+            notifications_suppress_duplicate_seconds=5,
+            notifications_suppress_question_after_task_seconds=12,
+            notifications_suppress_question_after_any_seconds=12,
+        )
+        mock_dedup_early.return_value = False
+        mock_lock.return_value = True
+        mock_suppressed.return_value = False
+        mock_load_state.return_value = MagicMock()
+        mock_resolve.return_value = "proj"
+        mock_branch.return_value = ""
+        mock_summary.return_value = ""
+
+        stdin = json.dumps(
+            {
+                "session_id": "s1",
+                "tool_name": "AskUserQuestion",
+            }
+        )
+        handle_hook_event("pre-tool-use", stdin)
+
+        call_kwargs = mock_notify.call_args.kwargs
+        assert call_kwargs["type"] == NotificationType.QUESTION
+
+
+class TestSetupHooks:
+    """Tests for setup_hooks function."""
+
+    @patch("kata.services.notifications.hooks.claude_code.Path")
+    def test_setup_creates_all_hook_types(self, mock_path_class):
+        import json as _json
+
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "{}"
+        mock_path_class.home.return_value.__truediv__ = lambda self, x: mock_path
+        mock_path.__truediv__ = lambda self, x: mock_path
+        mock_path.parent = mock_path
+
+        written_data = {}
+
+        def capture_write(data):
+            written_data["content"] = data
+
+        mock_path.write_text = capture_write
+
+        from kata.services.notifications.hooks.claude_code import setup_hooks
+
+        setup_hooks()
+
+        parsed = _json.loads(written_data["content"])
+        hooks = parsed.get("hooks", {})
+        assert "Stop" in hooks
+        assert "SubagentStop" in hooks
+        assert "PreToolUse" in hooks
+        assert "Notification" in hooks

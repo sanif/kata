@@ -1035,6 +1035,7 @@ def notifications_cmd(
         table.add_column("", width=2)
         table.add_column("Time", style="dim", width=16)
         table.add_column("Title", min_width=20)
+        table.add_column("Summary", style="dim", min_width=30, max_width=50)
         table.add_column("Session", style="cyan", width=15)
         table.add_column("Status", width=8)
 
@@ -1044,7 +1045,8 @@ def notifications_cmd(
             status_str = (
                 "[bold]● NEW[/bold]" if n.status == NotificationStatus.UNREAD else "[dim]○[/dim]"
             )
-            table.add_row(icon, time_str, n.title, n.session_name or "", status_str)
+            body_preview = n.body.strip().split("\n")[0][:50] if n.body else ""
+            table.add_row(icon, time_str, n.title, body_preview, n.session_name or "", status_str)
 
         console.print(table)
         unread = store.unread_count()
@@ -1068,18 +1070,69 @@ def notifications_cmd(
         raise typer.Exit(1)
 
 
+@app.command("notify-popup", hidden=True)
+def notify_popup() -> None:
+    """Open interactive notification center (used by tmux popup)."""
+    from textual.app import App
+
+    from kata.tui.screens.notification_center import NotificationCenterModal
+
+    class NotificationPopupApp(App):
+        """Minimal app for the notification center popup."""
+
+        CSS = """
+        Screen {
+            background: transparent;
+        }
+        """
+
+        def on_mount(self) -> None:
+            self.push_screen(NotificationCenterModal(), self._on_result)
+
+        def _on_result(self, result: str | None) -> None:
+            self._session_to_switch = result
+            self.exit()
+
+    popup = NotificationPopupApp()
+    popup.run()
+
+    session = getattr(popup, "_session_to_switch", None)
+    if session:
+        from kata.services.sessions import attach_session
+
+        try:
+            attach_session(session)
+        except Exception as e:
+            console.print(f"[red]Error switching to session: {e}[/red]")
+
+
 # --- Hook handler commands (called by Claude Code / tmux) ---
 
 
-@app.command("notify-claude-stop", hidden=True)
-def notify_claude_stop() -> None:
-    """Handle Claude Code Stop/SubagentStop hook. Reads JSON from stdin."""
+@app.command("notify-hook", hidden=True)
+def notify_hook(
+    event_type: str = typer.Argument(
+        help="Hook event type: stop, subagent-stop, pre-tool-use, notification"
+    ),
+) -> None:
+    """Handle Claude Code hook events. Reads JSON from stdin."""
     import sys
 
-    from kata.services.notifications.hooks.claude_code import handle_claude_stop
+    from kata.services.notifications.hooks.claude_code import handle_hook_event
 
     stdin_data = sys.stdin.read()
-    handle_claude_stop(stdin_data)
+    handle_hook_event(event_type, stdin_data)
+
+
+@app.command("notify-claude-stop", hidden=True, deprecated=True)
+def notify_claude_stop() -> None:
+    """Deprecated: use notify-hook stop instead."""
+    import sys
+
+    from kata.services.notifications.hooks.claude_code import handle_hook_event
+
+    stdin_data = sys.stdin.read()
+    handle_hook_event("stop", stdin_data)
 
 
 @app.command("notify-tmux-event", hidden=True)
@@ -1095,11 +1148,55 @@ def notify_tmux_event(
 
 @app.command("notify-setup")
 def notify_setup() -> None:
-    """Set up Claude Code hooks for Kata notifications."""
+    """Set up Claude Code hooks and tmux keybinding for Kata notifications."""
+    import subprocess
+
     from kata.services.notifications.hooks.claude_code import setup_hooks
 
     setup_hooks()
-    console.print("[green]✓[/green] Claude Code hooks configured for Kata notifications.")
+    console.print("[green]✓[/green] Claude Code hooks configured.")
+
+    # Set up tmux keybinding: C-n → notification popup
+    tmux_line = 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
+    try:
+        # Set in running tmux server
+        subprocess.run(
+            [
+                "tmux",
+                "bind-key",
+                "-n",
+                "C-n",
+                "display-popup",
+                "-E",
+                "-w",
+                "80%",
+                "-h",
+                "60%",
+                "kata notify-popup",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        console.print(
+            "[green]✓[/green] Tmux keybinding set: [bold]Ctrl+N[/bold] → notifications popup."
+        )
+    except Exception:
+        console.print("[yellow]⚠[/yellow] Could not set tmux keybinding (tmux not running?).")
+
+    # Persist to ~/.tmux.conf if not already there
+    from pathlib import Path
+
+    tmux_conf = Path.home() / ".tmux.conf"
+    try:
+        existing = tmux_conf.read_text() if tmux_conf.exists() else ""
+        if "kata notify-popup" not in existing:
+            with tmux_conf.open("a") as f:
+                f.write(f"\n{tmux_line}\n")
+            console.print("[green]✓[/green] Added Ctrl+N to ~/.tmux.conf for persistence.")
+        else:
+            console.print("[dim]Ctrl+N already in ~/.tmux.conf[/dim]")
+    except Exception:
+        console.print("[yellow]⚠[/yellow] Could not update ~/.tmux.conf. Add manually:")
 
 
 @app.callback(invoke_without_command=True)
