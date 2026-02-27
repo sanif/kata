@@ -25,10 +25,6 @@ TYPE_EMOJI: dict[NotificationType, str] = {
     NotificationType.REVIEW_DONE: "🔍",
     NotificationType.ERROR: "🔴",
     NotificationType.SESSION_LIMIT: "⏱️",
-    NotificationType.SESSION_LAUNCHED: "▸",
-    NotificationType.SESSION_DETACHED: "◆",
-    NotificationType.SESSION_ATTACHED: "▸",
-    NotificationType.SESSION_KILLED: "✗",
     NotificationType.ROUTINE_COMPLETE: "◉",
 }
 
@@ -40,10 +36,6 @@ TYPE_TITLES: dict[NotificationType, str] = {
     NotificationType.REVIEW_DONE: "Review Complete",
     NotificationType.ERROR: "Error Occurred",
     NotificationType.SESSION_LIMIT: "Session Limit Reached",
-    NotificationType.SESSION_LAUNCHED: "Session Launched",
-    NotificationType.SESSION_DETACHED: "Session Detached",
-    NotificationType.SESSION_ATTACHED: "Session Attached",
-    NotificationType.SESSION_KILLED: "Session Killed",
     NotificationType.ROUTINE_COMPLETE: "Routine Complete",
 }
 

@@ -6,7 +6,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, OptionList, Static, Switch
+from textual.widgets import Input, OptionList, Static, Switch
 from textual.widgets.option_list import Option
 
 from kata.core.settings import (
@@ -28,9 +28,9 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     SettingsScreen #settings-container {
-        width: 60;
+        width: 66;
         height: auto;
-        max-height: 36;
+        max-height: 38;
         background: $surface;
         border: round $surface-lighten-2;
         padding: 1 2;
@@ -47,21 +47,21 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #settings-scroll {
         width: 100%;
         height: auto;
-        max-height: 28;
+        max-height: 32;
     }
 
-    SettingsScreen .section-label {
+    SettingsScreen .section-divider {
+        width: 100%;
+        height: 1;
         color: $text-muted;
-        text-style: bold;
         margin-top: 1;
-        margin-bottom: 1;
     }
 
     SettingsScreen .setting-group {
         width: 100%;
         height: auto;
-        margin-bottom: 1;
         padding: 0 1;
+        margin-bottom: 0;
     }
 
     SettingsScreen .setting-name {
@@ -71,20 +71,18 @@ class SettingsScreen(ModalScreen[None]):
     }
 
     SettingsScreen .setting-hint {
-        width: 100%;
-        height: 1;
         color: $text-muted;
-        margin-bottom: 1;
     }
 
     SettingsScreen .toggle-row {
         width: 100%;
-        height: auto;
+        height: 3;
         align: left middle;
     }
 
-    SettingsScreen .toggle-row .setting-name {
+    SettingsScreen .toggle-label {
         width: 1fr;
+        height: auto;
         content-align: left middle;
     }
 
@@ -100,7 +98,7 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #theme-list {
         width: 100%;
         height: auto;
-        max-height: 10;
+        max-height: 6;
         background: $surface;
         border: tall $surface-lighten-1;
     }
@@ -112,7 +110,7 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #sound-pack-list {
         width: 100%;
         height: auto;
-        max-height: 8;
+        max-height: 5;
         background: $surface;
         border: tall $surface-lighten-1;
     }
@@ -124,7 +122,7 @@ class SettingsScreen(ModalScreen[None]):
     SettingsScreen #project-notif-list {
         width: 100%;
         height: auto;
-        max-height: 8;
+        max-height: 5;
         background: $surface;
         border: tall $surface-lighten-1;
     }
@@ -135,13 +133,10 @@ class SettingsScreen(ModalScreen[None]):
 
     SettingsScreen #settings-footer {
         width: 100%;
-        height: auto;
+        height: 1;
         margin-top: 1;
         content-align: center middle;
-    }
-
-    SettingsScreen #close-btn {
-        width: auto;
+        color: $text-muted;
     }
     """
 
@@ -176,20 +171,17 @@ class SettingsScreen(ModalScreen[None]):
         self._settings = get_settings()
         self._theme_changed = False
         self._projects: list[str] = []
-        self._focusable_ids = [
-            "loop-switch",
-            "group-input",
-            "interval-input",
-            "notif-switch",
-            "sound-pack-list",
-            "project-notif-list",
-            "theme-list",
-            "close-btn",
-        ]
 
     def _format_theme_name(self, theme_id: str) -> str:
         """Format theme ID to display name."""
         return self.THEME_NAMES.get(theme_id, theme_id.replace("-", " ").title())
+
+    def _make_divider(self, label: str) -> str:
+        """Create a thin section divider: ── Label ──."""
+        pad = 60 - len(label) - 4  # account for ── and ── with spaces
+        left = pad // 2
+        right = pad - left
+        return f"[dim]{'─' * left} {label} {'─' * right}[/dim]"
 
     def compose(self) -> ComposeResult:
         """Compose the settings screen."""
@@ -202,22 +194,22 @@ class SettingsScreen(ModalScreen[None]):
 
             with VerticalScroll(id="settings-scroll"):
                 # -- General --
-                yield Static("[dim]General[/dim]", classes="section-label")
+                yield Static(self._make_divider("General"), classes="section-divider")
 
                 with Vertical(classes="setting-group"):
                     with Horizontal(classes="toggle-row"):
-                        yield Static("[bold]Loop Mode[/bold]", classes="setting-name")
+                        with Vertical(classes="toggle-label"):
+                            yield Static("[bold]Loop Mode[/bold]")
+                            yield Static(
+                                "[dim]Auto-launch dashboard after session exits[/dim]",
+                                classes="setting-hint",
+                            )
                         yield Switch(value=self._settings.loop_enabled, id="loop-switch")
-                    yield Static(
-                        "Auto-launch dashboard after session exits",
-                        classes="setting-hint",
-                    )
 
                 with Vertical(classes="setting-group"):
-                    yield Static("[bold]Default Group[/bold]", classes="setting-name")
                     yield Static(
-                        "Group for new projects without explicit group",
-                        classes="setting-hint",
+                        f"[bold]Default Group[/bold]  [dim]{self._settings.default_group or '(none)'}[/dim]",
+                        classes="setting-name",
                     )
                     yield Input(
                         value=self._settings.default_group,
@@ -226,10 +218,9 @@ class SettingsScreen(ModalScreen[None]):
                     )
 
                 with Vertical(classes="setting-group"):
-                    yield Static("[bold]Refresh Interval[/bold]", classes="setting-name")
                     yield Static(
-                        "Status refresh interval in seconds (1-60)",
-                        classes="setting-hint",
+                        f"[bold]Refresh Interval[/bold]  [dim]{self._settings.refresh_interval}s (1-60)[/dim]",
+                        classes="setting-name",
                     )
                     yield Input(
                         value=str(self._settings.refresh_interval),
@@ -238,26 +229,23 @@ class SettingsScreen(ModalScreen[None]):
                     )
 
                 # -- Notifications --
-                yield Static("[dim]Notifications[/dim]", classes="section-label")
+                yield Static(self._make_divider("Notifications"), classes="section-divider")
 
                 with Vertical(classes="setting-group"):
                     with Horizontal(classes="toggle-row"):
-                        yield Static("[bold]Notifications[/bold]", classes="setting-name")
+                        with Vertical(classes="toggle-label"):
+                            yield Static("[bold]Notifications[/bold]")
+                            yield Static(
+                                "[dim]Desktop and sound notifications[/dim]",
+                                classes="setting-hint",
+                            )
                         yield Switch(
                             value=self._settings.notifications_enabled,
                             id="notif-switch",
                         )
-                    yield Static(
-                        "Enable desktop and sound notifications",
-                        classes="setting-hint",
-                    )
 
                 with Vertical(classes="setting-group"):
                     yield Static("[bold]Sound Pack[/bold]", classes="setting-name")
-                    yield Static(
-                        "Choose notification sound style",
-                        classes="setting-hint",
-                    )
                     pack_options = [
                         Option(
                             f"{'● ' if p == self._settings.notifications_sound_pack else '  '}{name}",
@@ -268,10 +256,9 @@ class SettingsScreen(ModalScreen[None]):
                     yield OptionList(*pack_options, id="sound-pack-list")
 
                 with Vertical(classes="setting-group"):
-                    yield Static("[bold]Per Project[/bold]", classes="setting-name")
                     yield Static(
-                        "Toggle notifications per project (Enter to toggle)",
-                        classes="setting-hint",
+                        "[bold]Per Project[/bold]  [dim]Enter to toggle[/dim]",
+                        classes="setting-name",
                     )
                     disabled = set(self._settings.notifications_disabled_projects)
                     options = [
@@ -284,14 +271,10 @@ class SettingsScreen(ModalScreen[None]):
                     yield OptionList(*options, id="project-notif-list")
 
                 # -- Appearance --
-                yield Static("[dim]Appearance[/dim]", classes="section-label")
+                yield Static(self._make_divider("Appearance"), classes="section-divider")
 
                 with Vertical(classes="setting-group"):
                     yield Static("[bold]Theme[/bold]", classes="setting-name")
-                    yield Static(
-                        "Select a theme for the interface",
-                        classes="setting-hint",
-                    )
                     theme_options = [
                         Option(
                             f"{'● ' if t == self._settings.theme else '  '}{self._format_theme_name(t)}",
@@ -301,8 +284,7 @@ class SettingsScreen(ModalScreen[None]):
                     ]
                     yield OptionList(*theme_options, id="theme-list")
 
-            with Vertical(id="settings-footer"):
-                yield Button("Close", variant="primary", id="close-btn")
+            yield Static("[dim]esc to close[/dim]", id="settings-footer")
 
     def on_mount(self) -> None:
         """Focus first interactive widget on mount."""
@@ -312,46 +294,9 @@ class SettingsScreen(ModalScreen[None]):
             pass
 
     def on_descendant_focus(self, event) -> None:
-        """Auto-scroll to keep focused widget visible (Tab, arrow, click)."""
+        """Auto-scroll to keep focused widget visible."""
         try:
             event.widget.scroll_visible()
-        except Exception:
-            pass
-
-    def on_key(self, event) -> None:
-        """Handle arrow key navigation between settings."""
-        if event.key in ("up", "down"):
-            focused = self.focused
-            if focused is None:
-                return
-
-            # Don't intercept arrows inside OptionList (let it scroll items)
-            if isinstance(focused, OptionList):
-                return
-
-            if not isinstance(focused, Input | Switch | Button):
-                return
-
-            current_id = focused.id
-            if current_id not in self._focusable_ids:
-                return
-
-            idx = self._focusable_ids.index(current_id)
-            if event.key == "up" and idx > 0:
-                next_id = self._focusable_ids[idx - 1]
-                event.prevent_default()
-                self._focus_widget(next_id)
-            elif event.key == "down" and idx < len(self._focusable_ids) - 1:
-                next_id = self._focusable_ids[idx + 1]
-                event.prevent_default()
-                self._focus_widget(next_id)
-
-    def _focus_widget(self, widget_id: str) -> None:
-        """Focus a widget by ID and scroll it into view."""
-        try:
-            widget = self.query_one(f"#{widget_id}")
-            widget.focus()
-            widget.scroll_visible()
         except Exception:
             pass
 
@@ -467,11 +412,6 @@ class SettingsScreen(ModalScreen[None]):
                 title="Theme Applied",
             )
             self.post_message(self.SettingsChanged(self._settings))
-
-    @on(Button.Pressed, "#close-btn")
-    def on_close_pressed(self) -> None:
-        """Handle close button."""
-        self.dismiss(None)
 
     def action_close(self) -> None:
         """Handle escape key."""

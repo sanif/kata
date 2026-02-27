@@ -23,10 +23,6 @@ class TestNotificationType:
         assert NotificationType.SESSION_LIMIT.value == "session_limit"
 
     def test_kata_types_exist(self):
-        assert NotificationType.SESSION_LAUNCHED.value == "session_launched"
-        assert NotificationType.SESSION_DETACHED.value == "session_detached"
-        assert NotificationType.SESSION_ATTACHED.value == "session_attached"
-        assert NotificationType.SESSION_KILLED.value == "session_killed"
         assert NotificationType.ROUTINE_COMPLETE.value == "routine_complete"
 
 
@@ -71,9 +67,9 @@ class TestNotification:
     def test_create_with_all_fields(self):
         ts = datetime(2026, 2, 26, 12, 0, 0)
         n = Notification(
-            type=NotificationType.SESSION_LAUNCHED,
+            type=NotificationType.ROUTINE_COMPLETE,
             source=NotificationSource.KATA,
-            title="Session launched",
+            title="Routine complete",
             body="Launched my-project",
             session_name="my-project",
             priority=1,

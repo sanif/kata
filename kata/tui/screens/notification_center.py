@@ -25,10 +25,6 @@ TYPE_ICONS: dict[NotificationType, str] = {
     NotificationType.REVIEW_DONE: "󰍉",
     NotificationType.ERROR: "✗",
     NotificationType.SESSION_LIMIT: "󰥔",
-    NotificationType.SESSION_LAUNCHED: "▸",
-    NotificationType.SESSION_DETACHED: "◆",
-    NotificationType.SESSION_ATTACHED: "▸",
-    NotificationType.SESSION_KILLED: "✗",
     NotificationType.ROUTINE_COMPLETE: "◉",
 }
 

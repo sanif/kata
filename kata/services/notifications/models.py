@@ -20,11 +20,7 @@ class NotificationType(Enum):
     ERROR = "error"
     SESSION_LIMIT = "session_limit"
 
-    # Kata/tmux events
-    SESSION_LAUNCHED = "session_launched"
-    SESSION_DETACHED = "session_detached"
-    SESSION_ATTACHED = "session_attached"
-    SESSION_KILLED = "session_killed"
+    # Kata events
     ROUTINE_COMPLETE = "routine_complete"
 
 
