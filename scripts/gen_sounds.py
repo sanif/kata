@@ -349,23 +349,29 @@ def arcade_error() -> list[float]:
 # ══════════════════════════════════════════════════════════════
 
 
-def arabic_task_complete() -> list[float]:
-    """Oud pluck: warm descending oud-like double pluck with resonance.
+def _oud_pluck(freq: float, dur: float, volume: float = 0.28) -> list[float]:
+    """Generate an oud-like plucked string: triangle fundamental + fifth harmonic."""
+    fund = generate_tone(freq, dur, volume=volume, waveform="triangle", fade_out=dur * 0.7)
+    fifth = generate_tone(
+        freq * 1.5, dur * 0.8, volume=volume * 0.3, waveform="sine", fade_out=dur * 0.6
+    )
+    return mix_samples(fund, fifth)
 
-    Uses Hijaz-flavoured intervals (E4 → F4 → G#4 → A4).
+
+def arabic_task_complete() -> list[float]:
+    """Ascending Hijaz celebration: oud phrase climbing the Hijaz tetrachord.
+
+    D4 → Eb4 → F#4 → G4 → A4 (Hijaz ascending to resolution on fifth).
     """
-    # Oud-like: fundamental + slightly detuned octave for richness
-    notes = [440.0, 554.37]  # A4, C#5 (major third — bright resolution)
+    # Hijaz tetrachord + fifth: celebration = ascending to resolution
+    notes = [293.66, 311.13, 369.99, 392.00, 440.00]  # D4, Eb4, F#4, G4, A4
     parts = []
-    for freq in notes:
-        fund = generate_tone(freq, 0.12, volume=0.35, waveform="triangle", fade_out=0.08)
-        octave = generate_tone(freq * 2, 0.10, volume=0.12, waveform="sine", fade_out=0.08)
-        parts.append(mix_samples(fund, octave))
-        parts.append(add_silence(0.02))
-    # Sustained resolution
-    res = generate_tone(554.37, 0.25, volume=0.20, waveform="sine", fade_out=0.20)
-    res_fifth = generate_tone(440.0, 0.25, volume=0.12, waveform="sine", fade_out=0.20)
-    parts.append(mix_samples(res, res_fifth))
+    for i, freq in enumerate(notes):
+        dur = 0.08 if i < 4 else 0.22
+        vol = 0.26 if i < 4 else 0.30
+        parts.append(_oud_pluck(freq, dur, vol))
+        if i < 4:
+            parts.append(add_silence(0.02))
     return concat_samples(*parts)
 
 
@@ -390,66 +396,70 @@ def arabic_review_complete() -> list[float]:
 
 
 def arabic_question() -> list[float]:
-    """Ney call: breathy rising tone like a ney flute asking a question.
+    """Ney question: ascending Hijaz phrase on ney (breathy flute) ending unresolved.
 
-    Ascending sweep with vibrato, ending on a questioning higher note.
+    D4 → Eb4 → F#4 (stops before resolving to G4 — the question).
+    Ney timbre: sine fundamental + breathy 3rd harmonic + expressive vibrato.
     """
-    # Rising sweep with sine (ney-like breathy quality from mixing)
-    rise = pitch_sweep(350, 580, 0.18, volume=0.28, waveform="sine")
+    # Hijaz ascending but stopping short — questioning feel
+    notes = [293.66, 311.13, 369.99]  # D4, Eb4, F#4 (no G4 = unresolved)
 
-    # Questioning vibrato on top note
-    n_vib = int(SAMPLE_RATE * 0.15)
-    vibrato = []
-    for i in range(n_vib):
-        t = i / SAMPLE_RATE
-        vib = 6 * math.sin(2 * math.pi * 6 * t)  # 6Hz vibrato (slower, expressive)
-        freq = 580 + vib
-        val = math.sin(2 * math.pi * freq * t) * 0.6
-        # Breathy overtone
-        val += math.sin(2 * math.pi * freq * 3 * t) * 0.08
-        env = 1.0 - (i / n_vib) ** 0.7
-        vibrato.append(val * 0.25 * env)
+    def _ney_note(freq: float, dur: float, vol: float = 0.26) -> list[float]:
+        """Ney-like tone: sine + breathy 3rd harmonic + vibrato."""
+        n_samples = int(SAMPLE_RATE * dur)
+        samples = []
+        for i in range(n_samples):
+            t = i / SAMPLE_RATE
+            progress = i / n_samples
+            vib = 5 * math.sin(2 * math.pi * 5.5 * t) * min(1.0, t / 0.04)
+            f = freq + vib
+            val = math.sin(2 * math.pi * f * t)
+            val += math.sin(2 * math.pi * f * 3.01 * t) * 0.12  # breathy partial
+            # Envelope
+            if t < 0.01:
+                env = t / 0.01
+            elif progress > 0.6:
+                env = max(0, (1.0 - progress) / 0.4)
+            else:
+                env = 1.0
+            samples.append(val * vol * env)
+        return samples
 
-    return concat_samples(rise, vibrato)
+    parts = []
+    for i, freq in enumerate(notes):
+        dur = 0.10 if i < 2 else 0.20  # Linger on last note (questioning)
+        parts.append(_ney_note(freq, dur))
+        if i < 2:
+            parts.append(add_silence(0.03))
+    return concat_samples(*parts)
 
 
 def arabic_plan_ready() -> list[float]:
-    """Darbuka tap: rhythmic double-tap like a darbuka pattern (dum-tek).
+    """Oud readiness motif: gentle two-note oud phrase on Hijaz intervals.
 
-    Low thump followed by bright tap, with subtle resonance.
+    D4 → F#4 (the augmented second — the signature Hijaz interval).
+    Calm, signaling readiness without urgency.
     """
-    # Dum (low)
-    dum = generate_tone(150, 0.06, volume=0.40, waveform="sine", fade_out=0.04)
-    dum_body = generate_tone(120, 0.08, volume=0.15, waveform="sine", fade_out=0.06)
-    part1 = mix_samples(dum, dum_body)
-
-    gap = add_silence(0.06)
-
-    # Tek (high, bright)
-    tek = generate_tone(800, 0.04, volume=0.30, waveform="triangle", fade_out=0.02)
-    tek_ring = generate_tone(1200, 0.06, volume=0.10, waveform="sine", fade_out=0.05)
-    part2 = mix_samples(tek, tek_ring)
-
-    gap2 = add_silence(0.04)
-
-    # Tek again (softer, resolving)
-    tek2 = generate_tone(900, 0.04, volume=0.22, waveform="triangle", fade_out=0.02)
-    tek2_ring = generate_tone(1400, 0.08, volume=0.06, waveform="sine", fade_out=0.07)
-    part3 = mix_samples(tek2, tek2_ring)
-
-    return concat_samples(part1, gap, part2, gap2, part3)
+    # The augmented second (D4 → F#4) is the most distinctive Hijaz sound
+    n1 = _oud_pluck(293.66, 0.14, volume=0.24)  # D4
+    gap = add_silence(0.05)
+    n2 = _oud_pluck(369.99, 0.22, volume=0.28)  # F#4 (resolve on the augmented second)
+    return concat_samples(n1, gap, n2)
 
 
 def arabic_error() -> list[float]:
-    """Sad oud: descending phrase in minor feel, mournful tone."""
-    # Descending: G4 → F4 → Eb4 → D4 (Phrygian descent)
-    notes = [392.00, 349.23, 311.13, 293.66]
+    """Descending Hijaz lament: oud phrase falling through the tetrachord.
+
+    G4 → F#4 → Eb4 → D4 (Hijaz descending — mournful, resolved).
+    Uses _oud_pluck for consistent timbre with the rest of the pack.
+    """
+    # Hijaz descending (NOT Phrygian — F# not F natural)
+    notes = [392.00, 369.99, 311.13, 293.66]  # G4, F#4, Eb4, D4
     parts = []
     for i, freq in enumerate(notes):
-        dur = 0.12 if i < 3 else 0.20
-        fade = 0.06 if i < 3 else 0.16
-        n = generate_tone(freq, dur, volume=0.25, waveform="triangle", fade_out=fade)
-        parts.append(n)
+        dur = 0.10 if i < 3 else 0.22
+        vol = 0.24 if i < 3 else 0.28
+        parts.append(_oud_pluck(freq, dur, vol))
         if i < 3:
             parts.append(add_silence(0.02))
     return concat_samples(*parts)
