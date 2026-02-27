@@ -1154,7 +1154,9 @@ def notify_setup() -> None:
     from kata.services.notifications.hooks.claude_code import setup_hooks
 
     setup_hooks()
-    console.print("[green]✓[/green] Claude Code hooks configured.")
+    console.print(
+        "[green]✓[/green] Claude Code hooks configured (Stop, SubagentStop, PreToolUse, Notification)."
+    )
 
     # Set up tmux keybinding: C-n → notification popup
     tmux_line = 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
