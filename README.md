@@ -502,7 +502,7 @@ When inside a Kata-managed tmux session:
 | `Ctrl+Space` | Open project switcher (fzf popup) |
 | `Ctrl+N` | Open notification center popup |
 
-`Prefix + d` is the standard tmux detach. `Ctrl+Space` and `Ctrl+N` are configured during installation or via `kata notify-setup`.
+`Prefix + d` is the standard tmux detach. `Ctrl+Space` and `Ctrl+N` are configured during installation or via `kata setup`.
 
 ---
 
@@ -809,6 +809,34 @@ which kata-switch  # Should show ~/.local/bin/kata-switch
 kata list  # Check if registered
 kata scan ~/projects  # Re-scan if needed
 ```
+
+### Notifications not showing (macOS)
+
+Kata uses `terminal-notifier` for macOS notifications. If notifications aren't appearing:
+
+1. **Install terminal-notifier** (required):
+   ```bash
+   brew install terminal-notifier
+   ```
+
+2. **Enable notifications in macOS**:
+   - Open **System Settings → Notifications**
+   - Find **terminal-notifier** in the app list
+   - Set **Allow Notifications** to on
+   - Set alert style to **Alerts** (stays visible) or **Banners** (auto-dismiss)
+
+3. **Check Focus Mode**: Make sure Do Not Disturb / Focus Mode isn't silencing notifications.
+
+4. **Test directly**:
+   ```bash
+   terminal-notifier -title "Test" -message "Hello"
+   ```
+   If this doesn't show, the issue is in macOS notification settings.
+
+5. **Run setup** to configure all hooks:
+   ```bash
+   kata setup
+   ```
 
 ---
 

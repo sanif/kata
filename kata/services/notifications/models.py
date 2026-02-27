@@ -29,6 +29,7 @@ class NotificationSource(Enum):
 
     CLAUDE_CODE = "claude_code"
     GEMINI = "gemini"
+    CODEX = "codex"
     KATA = "kata"
     TMUX = "tmux"
 

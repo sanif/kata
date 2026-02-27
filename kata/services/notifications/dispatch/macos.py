@@ -13,7 +13,7 @@ import subprocess
 from kata.core.settings import get_settings
 from kata.services.notifications.dispatch.audio import play_sound, resolve_sound_path
 from kata.services.notifications.dispatch.summary import generate_summary
-from kata.services.notifications.models import Notification, NotificationType
+from kata.services.notifications.models import Notification, NotificationSource, NotificationType
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,15 @@ TYPE_EMOJI: dict[NotificationType, str] = {
     NotificationType.ERROR: "🔴",
     NotificationType.SESSION_LIMIT: "⏱️",
     NotificationType.ROUTINE_COMPLETE: "◉",
+}
+
+# Source labels with distinct icons
+SOURCE_LABELS: dict[NotificationSource, str] = {
+    NotificationSource.CLAUDE_CODE: "🟠 Claude Code",
+    NotificationSource.GEMINI: "🔵 Gemini",
+    NotificationSource.CODEX: "🟢 Codex",
+    NotificationSource.KATA: "⚪ Kata",
+    NotificationSource.TMUX: "⚪ tmux",
 }
 
 # Default titles per notification type
@@ -71,6 +80,14 @@ def build_notification_title(
     return " ".join(parts)
 
 
+def _source_subtitle(source: NotificationSource, session_name: str) -> str:
+    """Build subtitle showing source label and optional session name."""
+    label = SOURCE_LABELS.get(source, source.value)
+    if session_name:
+        return f"{label} · {session_name}"
+    return label
+
+
 def _has_terminal_notifier() -> bool:
     return shutil.which("terminal-notifier") is not None
 
@@ -99,17 +116,16 @@ def send_macos_notification(notification: Notification) -> bool:
 
     # Generate summary body
     body = generate_summary(notification.body) if notification.body else ""
-    if notification.session_name and body:
-        body = f"{notification.session_name} — {body}"
-    elif notification.session_name:
-        body = notification.session_name
+
+    # Build subtitle with source label + session name
+    subtitle = _source_subtitle(notification.source, notification.session_name)
 
     # Send OS notification (without sound — we handle sound separately)
     sent = False
     if _has_terminal_notifier():
-        sent = _send_via_terminal_notifier(title, body, notification)
+        sent = _send_via_terminal_notifier(title, body, subtitle, notification)
     else:
-        sent = _send_via_osascript(title, body)
+        sent = _send_via_osascript(title, body, subtitle)
 
     # Play per-type sound
     if settings.notifications_sound_enabled:
@@ -124,7 +140,9 @@ def send_macos_notification(notification: Notification) -> bool:
     return sent
 
 
-def _send_via_terminal_notifier(title: str, body: str, notification: Notification) -> bool:
+def _send_via_terminal_notifier(
+    title: str, body: str, subtitle: str, notification: Notification
+) -> bool:
     cmd = [
         "terminal-notifier",
         "-title",
@@ -132,14 +150,12 @@ def _send_via_terminal_notifier(title: str, body: str, notification: Notificatio
         "-message",
         body or " ",
         "-subtitle",
-        notification.session_name or "",
+        subtitle,
         "-group",
         f"kata-{notification.type.value}",
-        "-sender",
-        "com.github.wez.wezterm",
+        "-timeout",
+        "15",
     ]
-    if notification.session_name:
-        cmd.extend(["-execute", f"kata switch {notification.session_name}"])
 
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -149,10 +165,15 @@ def _send_via_terminal_notifier(title: str, body: str, notification: Notificatio
         return False
 
 
-def _send_via_osascript(title: str, body: str) -> bool:
+def _send_via_osascript(title: str, body: str, subtitle: str) -> bool:
     escaped_title = _escape_applescript(title)
     escaped_body = _escape_applescript(body or " ")
-    script = f'display notification "{escaped_body}" ' f'with title "{escaped_title}"'
+    escaped_subtitle = _escape_applescript(subtitle)
+    script = (
+        f'display notification "{escaped_body}" '
+        f'with title "{escaped_title}" '
+        f'subtitle "{escaped_subtitle}"'
+    )
     try:
         subprocess.Popen(
             ["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

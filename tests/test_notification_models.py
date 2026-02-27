@@ -31,6 +31,8 @@ class TestNotificationSource:
 
     def test_sources_exist(self):
         assert NotificationSource.CLAUDE_CODE.value == "claude_code"
+        assert NotificationSource.GEMINI.value == "gemini"
+        assert NotificationSource.CODEX.value == "codex"
         assert NotificationSource.KATA.value == "kata"
         assert NotificationSource.TMUX.value == "tmux"
 
