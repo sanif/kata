@@ -2,7 +2,7 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from kata.core.config import KATA_CONFIG_DIR
@@ -46,6 +46,19 @@ class Settings:
     notifications_suppression_seconds: int = 5
     notifications_terminal_app: str = "auto"
 
+    # Sound (new)
+    notifications_sound_enabled: bool = True
+    notifications_volume: float = 1.0
+    notifications_sounds: dict[str, str] = field(default_factory=dict)
+
+    # Suppression (new — replaces notifications_suppression_seconds)
+    notifications_suppress_question_after_task_seconds: int = 12
+    notifications_suppress_question_after_any_seconds: int = 12
+    notifications_suppress_duplicate_seconds: int = 5
+
+    # Classification (new)
+    notifications_subagent_stop: bool = False
+
     def __post_init__(self) -> None:
         """Validate and clamp values."""
         # Clamp refresh_interval to valid range (1-60)
@@ -60,6 +73,20 @@ class Settings:
         self.notifications_max_count = max(10, min(10000, self.notifications_max_count))
         self.notifications_suppression_seconds = max(
             0, min(300, self.notifications_suppression_seconds)
+        )
+
+        # Volume: 0.0-1.0
+        self.notifications_volume = max(0.0, min(1.0, self.notifications_volume))
+
+        # Suppression seconds: 0-300
+        self.notifications_suppress_question_after_task_seconds = max(
+            0, min(300, self.notifications_suppress_question_after_task_seconds)
+        )
+        self.notifications_suppress_question_after_any_seconds = max(
+            0, min(300, self.notifications_suppress_question_after_any_seconds)
+        )
+        self.notifications_suppress_duplicate_seconds = max(
+            0, min(300, self.notifications_suppress_duplicate_seconds)
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,6 +110,19 @@ class Settings:
             notifications_tmux_hooks=data.get("notifications_tmux_hooks", True),
             notifications_suppression_seconds=data.get("notifications_suppression_seconds", 5),
             notifications_terminal_app=data.get("notifications_terminal_app", "auto"),
+            notifications_sound_enabled=data.get("notifications_sound_enabled", True),
+            notifications_volume=data.get("notifications_volume", 1.0),
+            notifications_sounds=data.get("notifications_sounds", {}),
+            notifications_suppress_question_after_task_seconds=data.get(
+                "notifications_suppress_question_after_task_seconds", 12
+            ),
+            notifications_suppress_question_after_any_seconds=data.get(
+                "notifications_suppress_question_after_any_seconds", 12
+            ),
+            notifications_suppress_duplicate_seconds=data.get(
+                "notifications_suppress_duplicate_seconds", 5
+            ),
+            notifications_subagent_stop=data.get("notifications_subagent_stop", False),
         )
 
 

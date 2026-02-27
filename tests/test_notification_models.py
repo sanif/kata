@@ -227,3 +227,65 @@ class TestNotificationSettings:
         assert s.notifications_retention_days == 1
         s2 = Settings(notifications_retention_days=400)
         assert s2.notifications_retention_days == 365
+
+
+class TestNewNotificationSettings:
+    """Test new notification settings fields (dispatch rewrite)."""
+
+    def test_default_sound_enabled(self):
+        from kata.core.settings import Settings
+
+        s = Settings()
+        assert s.notifications_sound_enabled is True
+
+    def test_default_volume(self):
+        from kata.core.settings import Settings
+
+        s = Settings()
+        assert s.notifications_volume == 1.0
+
+    def test_volume_clamped_high(self):
+        from kata.core.settings import Settings
+
+        s = Settings(notifications_volume=5.0)
+        assert s.notifications_volume == 1.0
+
+    def test_volume_clamped_low(self):
+        from kata.core.settings import Settings
+
+        s = Settings(notifications_volume=-1.0)
+        assert s.notifications_volume == 0.0
+
+    def test_default_suppression_fields(self):
+        from kata.core.settings import Settings
+
+        s = Settings()
+        assert s.notifications_suppress_question_after_task_seconds == 12
+        assert s.notifications_suppress_question_after_any_seconds == 12
+        assert s.notifications_suppress_duplicate_seconds == 5
+
+    def test_suppression_clamped(self):
+        from kata.core.settings import Settings
+
+        s = Settings(notifications_suppress_duplicate_seconds=999)
+        assert s.notifications_suppress_duplicate_seconds == 300
+
+    def test_default_subagent_stop(self):
+        from kata.core.settings import Settings
+
+        s = Settings()
+        assert s.notifications_subagent_stop is False
+
+    def test_default_sounds_dict(self):
+        from kata.core.settings import Settings
+
+        s = Settings()
+        assert s.notifications_sounds == {}
+
+    def test_backward_compat_from_dict(self):
+        from kata.core.settings import Settings
+
+        data = {"loop_enabled": True, "notifications_sound": "Glass"}
+        s = Settings.from_dict(data)
+        assert s.notifications_sound_enabled is True
+        assert s.notifications_volume == 1.0
