@@ -143,6 +143,38 @@ class Registry:
         """
         return list(self._projects.values())
 
+    def get_recent_projects(
+        self,
+        limit: int = 5,
+        current_session: str | None = None,
+    ) -> list[Project]:
+        """Get most recently opened projects in Alt+Tab order.
+
+        Args:
+            limit: Maximum number of projects to return
+            current_session: Current session name; if provided, its project
+                is moved to position 1 (so position 0 is the "previous" project)
+
+        Returns:
+            List of projects sorted by last_opened descending, with None last
+        """
+        from datetime import datetime
+
+        from kata.utils.paths import sanitize_session_name
+
+        sorted_projects = sorted(
+            self._projects.values(),
+            key=lambda p: (p.last_opened or datetime.min,),
+            reverse=True,
+        )
+        if current_session and len(sorted_projects) >= 2:
+            for i, p in enumerate(sorted_projects):
+                if p.name == current_session or sanitize_session_name(p.name) == current_session:
+                    sorted_projects.pop(i)
+                    sorted_projects.insert(1, p)
+                    break
+        return sorted_projects[:limit]
+
     def list_by_group(self, group: str) -> list[Project]:
         """List projects in a specific group.
 
