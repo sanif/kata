@@ -35,7 +35,7 @@ fi
 info "This will add the following to ~/.tmux.conf:"
 echo ""
 echo -e "${YELLOW}$KATA_TMUX_MARKER"
-echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"'
+echo 'bind-key -n C-Space display-popup -E -w 70 -h 3 "kata switch-strip"'
 echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
 echo -e "${NC}"
 echo ""
@@ -52,7 +52,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Add configuration
     echo "" >> "$TMUX_CONF"
     echo "$KATA_TMUX_MARKER" >> "$TMUX_CONF"
-    echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> "$TMUX_CONF"
+    echo 'bind-key -n C-Space display-popup -E -w 70 -h 3 "kata switch-strip"' >> "$TMUX_CONF"
     echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"' >> "$TMUX_CONF"
 
     success "Configuration added to ~/.tmux.conf"
