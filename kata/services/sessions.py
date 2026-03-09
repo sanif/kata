@@ -147,6 +147,26 @@ def is_inside_tmux() -> bool:
     return bool(os.environ.get("TMUX"))
 
 
+def get_current_tmux_session() -> str | None:
+    """Get the name of the current tmux session, if any.
+
+    Returns:
+        Session name string, or None if not in a tmux session.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#S"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
 def launch_session(project: Project) -> None:
     """Launch a new tmux session for a project.
 
