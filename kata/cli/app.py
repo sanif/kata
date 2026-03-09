@@ -943,6 +943,20 @@ def switch_preview(
     console.print(f"[cyan]Last:[/cyan]    {last_opened}")
 
 
+@app.command("switch-strip", hidden=True)
+def switch_strip_cmd(
+    limit: int = typer.Option(5, "--limit", help="Number of recent projects to show"),
+) -> None:
+    """Quick project switcher strip for tmux overlay.
+
+    Shows a horizontal strip of recent projects.
+    Space cycles, Enter confirms, Escape cancels.
+    """
+    from kata.cli.switch_strip import run_switch_strip
+
+    run_switch_strip(limit=limit)
+
+
 @app.command()
 def migrate() -> None:
     """Migrate configs from legacy location to project folders.
