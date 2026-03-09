@@ -20,6 +20,7 @@ from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
 from kata.tui.screens.notification_center import NotificationCenterModal
 from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
+from kata.tui.screens.switcher import SwitcherModal
 from kata.tui.screens.wizard import AddWizard
 from kata.tui.themes import KATA_THEMES
 from kata.tui.widgets.preview import PreviewPane
@@ -201,6 +202,7 @@ class KataDashboard(App):
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
         Binding("tab", "switch_section", "Switch Section", show=False),
+        Binding("ctrl+at", "quick_switch", "Switch", show=False),
         Binding("[", "focus_projects", "Projects"),
         Binding("]", "focus_recents", "Recents"),
         Binding("1", "launch_shortcut_1", "1", show=False),
@@ -457,6 +459,20 @@ class KataDashboard(App):
             self._focus_on_recents = True
         except Exception:
             pass
+
+    def action_quick_switch(self) -> None:
+        """Open the quick project switcher."""
+        self.push_screen(SwitcherModal(), self._on_switcher_result)
+
+    def _on_switcher_result(self, result: Project | None) -> None:
+        """Handle switcher modal result."""
+        if result is None:
+            return
+        result.record_open()
+        registry = get_registry()
+        registry.update(result)
+        self._project_to_launch = result
+        self.exit()
 
     def _launch_by_shortcut(self, shortcut: int) -> None:
         """Launch project by shortcut number."""
