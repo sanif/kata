@@ -43,6 +43,36 @@ class TestRenderStrip:
         text = render_strip([], {}, selected_index=0)
         assert text.plain.strip() == ""
 
+    def test_empty_projects_panel(self):
+        from kata.cli.switch_strip import render_panel
+
+        lines = render_panel([], {}, selected_index=0, term_width=40)
+        # Should still render borders without crashing
+        assert len(lines) > 0
+
+
+class TestRenderPanelColors:
+    def test_project_with_color_shows_colored_bar(self):
+        from kata.cli.switch_strip import render_panel
+
+        p = _make_project("myproj")
+        p.color = "blue"
+        lines = render_panel([p], {}, selected_index=0, term_width=40)
+        full_text = "".join(line.plain for line in lines)
+        assert "┃" in full_text
+        assert "myproj" in full_text
+
+    def test_project_without_color_selected_gets_cyan_bar(self):
+        from kata.cli.switch_strip import render_panel
+
+        p = _make_project("myproj")
+        p.color = None
+        lines = render_panel([p], {}, selected_index=0, term_width=40)
+        full_text = "".join(line.plain for line in lines)
+        assert "┃" in full_text  # still has selection bar, just cyan
+
+
+class TestRenderStripStatus:
     def test_status_colors(self):
         from kata.cli.switch_strip import render_strip
 
