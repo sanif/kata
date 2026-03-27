@@ -945,16 +945,86 @@ def switch_preview(
 
 @app.command("switch-strip", hidden=True)
 def switch_strip_cmd(
-    limit: int = typer.Option(5, "--limit", help="Number of recent projects to show"),
+    backward: bool = typer.Option(False, "--backward", "-b", help="Cycle backward"),
+    popup: bool = typer.Option(False, "--popup", hidden=True, help="Run inside popup"),
 ) -> None:
-    """Quick project switcher strip for tmux overlay.
+    """Quick project switcher for tmux overlay.
 
-    Shows a horizontal strip of recent projects.
-    Space cycles, Enter confirms, Escape cancels.
+    When called directly, spawns a correctly-sized tmux popup.
+    The popup runs this command again with --popup for the interactive UI.
     """
-    from kata.cli.switch_strip import run_switch_strip
+    from kata.cli.switch_strip import open_switcher_popup, run_switch_strip
 
-    run_switch_strip(limit=limit)
+    if popup:
+        run_switch_strip(backward=backward)
+    else:
+        open_switcher_popup(backward=backward)
+
+
+@app.command()
+def color(
+    name: str | None = typer.Argument(None, help="Project name"),
+    color_value: str | None = typer.Argument(None, help="Color preset name or hex code"),
+    list_presets: bool = typer.Option(False, "--list", "-l", help="List available color presets"),
+    clear: bool = typer.Option(False, "--clear", "-c", help="Remove color from project"),
+) -> None:
+    """Set, view, or clear a project's color indicator.
+
+    Examples:
+        kata color --list              # Show available presets
+        kata color myproject blue      # Set color
+        kata color myproject "#FF5733" # Set hex color
+        kata color myproject --clear   # Remove color
+        kata color myproject           # Show current color
+    """
+    from kata.utils.colors import COLOR_PRESETS, resolve_color
+
+    if list_presets:
+        console.print("[bold]Available color presets:[/bold]\n")
+        for preset_name, hex_val in COLOR_PRESETS.items():
+            console.print(f"  [{hex_val}]██[/{hex_val}]  {preset_name:<10} {hex_val}")
+        return
+
+    if not name:
+        console.print("[red]Error:[/red] Provide a project name or use --list")
+        raise typer.Exit(1)
+
+    registry = get_registry()
+    try:
+        project = registry.get(name)
+    except ProjectNotFoundError:
+        console.print(f"[red]Error:[/red] Project not found: {name}")
+        raise typer.Exit(1)
+
+    if clear:
+        project.color = None
+        registry.update(project)
+        console.print(f"[green]✓[/green] Cleared color for [bold]{name}[/bold]")
+        return
+
+    if color_value is None:
+        # Show current color
+        if project.color:
+            hex_val = resolve_color(project.color) or project.color
+            console.print(f"[{hex_val}]██[/{hex_val}]  {project.color}")
+        else:
+            console.print(f"[dim]No color set for {name}[/dim]")
+        return
+
+    # Validate color
+    resolved = resolve_color(color_value)
+    if resolved is None:
+        console.print(f"[red]Error:[/red] Unknown color: {color_value}")
+        console.print(
+            "Use a preset name or hex code (#RRGGBB). Run [bold]kata color --list[/bold] to see presets."
+        )
+        raise typer.Exit(1)
+
+    project.color = color_value
+    registry.update(project)
+    console.print(
+        f"[green]✓[/green] Set [bold]{name}[/bold] color to [{resolved}]██[/{resolved}]  {color_value}"
+    )
 
 
 @app.command()
@@ -1105,39 +1175,20 @@ def notifications_cmd(
 
 
 @app.command("notify-popup", hidden=True)
-def notify_popup() -> None:
-    """Open interactive notification center (used by tmux popup)."""
-    from textual.app import App
+def notify_popup(
+    popup: bool = typer.Option(False, "--popup", hidden=True, help="Run inside popup"),
+) -> None:
+    """Open interactive notification center (used by tmux popup).
 
-    from kata.tui.screens.notification_center import NotificationCenterModal
+    When called directly, spawns a correctly-sized tmux popup.
+    The popup runs this command again with --popup for the interactive UI.
+    """
+    from kata.cli.notify_strip import open_notify_popup, run_notify_popup
 
-    class NotificationPopupApp(App):
-        """Minimal app for the notification center popup."""
-
-        CSS = """
-        Screen {
-            background: transparent;
-        }
-        """
-
-        def on_mount(self) -> None:
-            self.push_screen(NotificationCenterModal(), self._on_result)
-
-        def _on_result(self, result: str | None) -> None:
-            self._session_to_switch = result
-            self.exit()
-
-    popup = NotificationPopupApp()
-    popup.run()
-
-    session = getattr(popup, "_session_to_switch", None)
-    if session:
-        from kata.services.sessions import attach_session
-
-        try:
-            attach_session(session)
-        except Exception as e:
-            console.print(f"[red]Error switching to session: {e}[/red]")
+    if popup:
+        run_notify_popup()
+    else:
+        open_notify_popup()
 
 
 # --- Hook handler commands (called by Claude Code / Gemini / Codex / tmux) ---
@@ -1225,215 +1276,9 @@ def notify_tmux_event(
 @app.command("setup")
 def setup() -> None:
     """Interactive setup for Kata integrations (hooks, keybindings)."""
-    import json
-    import shutil
-    import subprocess
+    from kata.cli.setup_tui import run_setup
 
-    from rich.panel import Panel
-    from rich.prompt import Confirm
-
-    from kata.services.notifications.hooks.claude_code import setup_hooks as setup_claude
-    from kata.services.notifications.hooks.codex import setup_hooks as setup_codex
-    from kata.services.notifications.hooks.gemini import setup_hooks as setup_gemini
-
-    # --- Detect current state ---
-    claude_settings = Path.home() / ".claude" / "settings.json"
-    gemini_settings = Path.home() / ".gemini" / "settings.json"
-    codex_settings = Path.home() / ".codex" / "config.toml"
-    tmux_conf = Path.home() / ".tmux.conf"
-
-    def _has_kata_hooks(settings_path: Path) -> bool:
-        if not settings_path.exists():
-            return False
-        try:
-            data = json.loads(settings_path.read_text())
-            for event_hooks in data.get("hooks", {}).values():
-                for entry in event_hooks:
-                    for h in entry.get("hooks", []):
-                        if "kata notify" in h.get("command", ""):
-                            return True
-        except Exception:
-            pass
-        return False
-
-    def _has_tmux_binding() -> bool:
-        if not tmux_conf.exists():
-            return False
-        try:
-            return "kata notify-popup" in tmux_conf.read_text()
-        except Exception:
-            return False
-
-    def _has_codex_notify(config_path: Path) -> bool:
-        if not config_path.exists():
-            return False
-        try:
-            return "kata notify-hook codex" in config_path.read_text()
-        except Exception:
-            return False
-
-    claude_configured = _has_kata_hooks(claude_settings)
-    gemini_configured = _has_kata_hooks(gemini_settings)
-    codex_configured = _has_codex_notify(codex_settings)
-    tn_installed = shutil.which("terminal-notifier") is not None
-    tmux_configured = _has_tmux_binding()
-
-    # --- Header ---
-    console.print()
-    console.print(
-        Panel(
-            "[bold]Kata Setup[/bold]\n\n"
-            "Configure integrations for your development environment.\n"
-            "Select which components to set up.",
-            border_style="blue",
-        )
-    )
-    console.print()
-
-    # --- Collect selections ---
-    steps: list[str] = []
-
-    # Claude Code hooks
-    tag = "[green]configured[/green]" if claude_configured else "[dim]not configured[/dim]"
-    console.print(f"  [bold]1.[/bold] Claude Code hooks  ({tag})")
-    console.print("     Hooks: Stop, SubagentStop, PreToolUse, Notification")
-    if Confirm.ask("     Enable?", default=not claude_configured):
-        steps.append("claude")
-    console.print()
-
-    # Gemini CLI hooks
-    tag = "[green]configured[/green]" if gemini_configured else "[dim]not configured[/dim]"
-    console.print(f"  [bold]2.[/bold] Gemini CLI hooks   ({tag})")
-    console.print("     Hooks: AfterAgent, BeforeTool, Notification, SessionEnd")
-    if Confirm.ask("     Enable?", default=not gemini_configured):
-        steps.append("gemini")
-    console.print()
-
-    # Codex CLI notify command
-    tag = "[green]configured[/green]" if codex_configured else "[dim]not configured[/dim]"
-    console.print(f"  [bold]3.[/bold] Codex CLI notify    ({tag})")
-    console.print("     Notify: ~/.codex/config.toml -> kata notify-hook codex")
-    if Confirm.ask("     Enable?", default=not codex_configured):
-        steps.append("codex")
-    console.print()
-
-    # terminal-notifier (brew)
-    tag = "[green]installed[/green]" if tn_installed else "[dim]not installed[/dim]"
-    console.print(f"  [bold]4.[/bold] terminal-notifier  ({tag})")
-    console.print("     Required for persistent macOS notifications (15s timeout)")
-    if Confirm.ask("     Install via brew?", default=not tn_installed):
-        steps.append("terminal-notifier")
-    console.print()
-
-    # Tmux keybinding
-    tag = "[green]configured[/green]" if tmux_configured else "[dim]not configured[/dim]"
-    console.print(f"  [bold]5.[/bold] Tmux keybinding    ({tag})")
-    console.print("     Ctrl+N → notification popup")
-    if Confirm.ask("     Enable?", default=not tmux_configured):
-        steps.append("tmux")
-    console.print()
-
-    if not steps:
-        console.print("[dim]Nothing selected. Setup complete.[/dim]")
-        return
-
-    # --- Execute selected steps ---
-    console.rule("[bold]Applying[/bold]")
-    console.print()
-
-    if "claude" in steps:
-        try:
-            setup_claude()
-            console.print(
-                "[green]✓[/green] Claude Code hooks configured "
-                "(Stop, SubagentStop, PreToolUse, Notification)."
-            )
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not configure Claude Code hooks: {e}")
-
-    if "gemini" in steps:
-        try:
-            setup_gemini()
-            console.print(
-                "[green]✓[/green] Gemini CLI hooks configured "
-                "(AfterAgent, BeforeTool, Notification, SessionEnd)."
-            )
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not configure Gemini CLI hooks: {e}")
-
-    if "codex" in steps:
-        try:
-            setup_codex()
-            console.print("[green]✓[/green] Codex notify hook configured (agent turn complete).")
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not configure Codex notify hook: {e}")
-
-    if "terminal-notifier" in steps:
-        if tn_installed:
-            console.print("[dim]terminal-notifier already installed[/dim]")
-        elif shutil.which("brew"):
-            try:
-                console.print("[dim]Installing terminal-notifier via brew...[/dim]")
-                result = subprocess.run(
-                    ["brew", "install", "terminal-notifier"],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    console.print("[green]✓[/green] terminal-notifier installed.")
-                else:
-                    console.print(
-                        f"[yellow]⚠[/yellow] brew install failed: {result.stderr.strip()}"
-                    )
-            except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not install terminal-notifier: {e}")
-        else:
-            console.print(
-                "[yellow]⚠[/yellow] Homebrew not found. Install manually: "
-                "[bold]brew install terminal-notifier[/bold]"
-            )
-
-    if "tmux" in steps:
-        tmux_line = 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"'
-        try:
-            subprocess.run(
-                [
-                    "tmux",
-                    "bind-key",
-                    "-n",
-                    "C-n",
-                    "display-popup",
-                    "-E",
-                    "-w",
-                    "80%",
-                    "-h",
-                    "60%",
-                    "kata notify-popup",
-                ],
-                capture_output=True,
-                timeout=5,
-            )
-            console.print(
-                "[green]✓[/green] Tmux keybinding set: [bold]Ctrl+N[/bold] → notification popup."
-            )
-        except Exception:
-            console.print("[yellow]⚠[/yellow] Could not set tmux keybinding (tmux not running?).")
-
-        # Persist to ~/.tmux.conf
-        try:
-            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
-            if "kata notify-popup" not in existing:
-                with tmux_conf.open("a") as f:
-                    f.write(f"\n{tmux_line}\n")
-                console.print("[green]✓[/green] Added Ctrl+N to ~/.tmux.conf for persistence.")
-            else:
-                console.print("[dim]Ctrl+N already in ~/.tmux.conf[/dim]")
-        except Exception:
-            console.print("[yellow]⚠[/yellow] Could not update ~/.tmux.conf.")
-
-    console.print()
-    console.print("[green]✓[/green] Setup complete!")
+    run_setup()
 
 
 @app.callback(invoke_without_command=True)

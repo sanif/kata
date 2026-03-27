@@ -54,6 +54,19 @@ class TestResolveColor:
             assert len(hex_val) == 7, f"{name} preset wrong length"
 
 
+class TestColorCommand:
+    def test_list_presets(self):
+        from typer.testing import CliRunner
+
+        from kata.cli.app import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["color", "--list"])
+        assert result.exit_code == 0
+        assert "blue" in result.output
+        assert "red" in result.output
+
+
 class TestHexTo256:
     def test_pure_red(self):
         result = hex_to_256("#FF0000")
