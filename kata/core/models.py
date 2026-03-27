@@ -36,6 +36,7 @@ class Project:
     last_opened: datetime | None = None
     times_opened: int = 0
     shortcut: int | None = None  # Quick launch shortcut (1-9)
+    color: str | None = None  # Display color (preset name or hex)
 
     def __post_init__(self) -> None:
         """Ensure path is absolute and config is set."""
@@ -54,6 +55,7 @@ class Project:
             "last_opened": self.last_opened.isoformat() if self.last_opened else None,
             "times_opened": self.times_opened,
             "shortcut": self.shortcut,
+            "color": self.color,
         }
 
     @classmethod
@@ -70,6 +72,7 @@ class Project:
             ),
             times_opened=data.get("times_opened", 0),
             shortcut=data.get("shortcut"),
+            color=data.get("color"),
         )
 
     @classmethod

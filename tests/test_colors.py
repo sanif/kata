@@ -1,4 +1,35 @@
+from kata.core.models import Project
 from kata.utils.colors import COLOR_PRESETS, hex_to_256, resolve_color
+
+
+class TestProjectColor:
+    def test_default_color_is_none(self):
+        p = Project(name="test", path="/tmp/test")
+        assert p.color is None
+
+    def test_color_serialization(self):
+        p = Project(name="test", path="/tmp/test", color="blue")
+        d = p.to_dict()
+        assert d["color"] == "blue"
+
+    def test_color_deserialization(self):
+        d = {
+            "name": "test",
+            "path": "/tmp/test",
+            "created_at": "2026-01-01T00:00:00",
+            "color": "#FF5733",
+        }
+        p = Project.from_dict(d)
+        assert p.color == "#FF5733"
+
+    def test_missing_color_in_dict_defaults_none(self):
+        d = {
+            "name": "test",
+            "path": "/tmp/test",
+            "created_at": "2026-01-01T00:00:00",
+        }
+        p = Project.from_dict(d)
+        assert p.color is None
 
 
 class TestResolveColor:
