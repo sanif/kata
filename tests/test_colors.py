@@ -85,3 +85,40 @@ class TestHexTo256:
         result = hex_to_256("#5B9BD5")
         assert isinstance(result, int)
         assert 0 <= result <= 255
+
+
+class TestColorIntegration:
+    def test_set_color_then_resolve_in_strip(self):
+        """Verify a project with color set renders correctly in switch strip."""
+        from kata.cli.switch_strip import render_panel
+
+        p = Project(name="colored-proj", path="/tmp/colored-proj", color="teal")
+        assert resolve_color(p.color) == "#56B6C2"
+
+        lines = render_panel([p], {}, selected_index=0, term_width=40)
+        full_text = "".join(line.plain for line in lines)
+        assert "colored-proj" in full_text
+
+    def test_color_roundtrip_serialization(self):
+        """Verify color survives serialization/deserialization."""
+        p = Project(name="test", path="/tmp/test", color="purple")
+        d = p.to_dict()
+        p2 = Project.from_dict(d)
+        assert p2.color == "purple"
+
+    def test_hex_color_roundtrip(self):
+        """Verify hex color survives serialization."""
+        p = Project(name="test", path="/tmp/test", color="#FF5733")
+        d = p.to_dict()
+        p2 = Project.from_dict(d)
+        assert p2.color == "#FF5733"
+
+    def test_no_color_backward_compat(self):
+        """Verify projects without color work in switch strip."""
+        from kata.cli.switch_strip import render_panel
+
+        p = Project(name="no-color", path="/tmp/no-color")
+        assert p.color is None
+        lines = render_panel([p], {}, selected_index=0, term_width=40)
+        full_text = "".join(line.plain for line in lines)
+        assert "no-color" in full_text
