@@ -48,6 +48,15 @@ class TestResolveColor:
     def test_unknown_name_returns_none(self):
         assert resolve_color("unicorn") is None
 
+    def test_invalid_hex_too_short(self):
+        assert resolve_color("#12") is None
+
+    def test_invalid_hex_bad_chars(self):
+        assert resolve_color("#ZZZZZZ") is None
+
+    def test_invalid_hex_too_long(self):
+        assert resolve_color("#1234567") is None
+
     def test_all_presets_are_valid_hex(self):
         for name, hex_val in COLOR_PRESETS.items():
             assert hex_val.startswith("#"), f"{name} preset is not hex"

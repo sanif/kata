@@ -36,3 +36,17 @@ def apply_project_color(session_name: str, color: str | None) -> None:
             subprocess.run(cmd, capture_output=True, timeout=5)
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
+
+
+def clear_project_color(session_name: str) -> None:
+    """Reset tmux session styling to defaults."""
+    cmds = [
+        ["tmux", "set", "-t", session_name, "-u", "pane-border-style"],
+        ["tmux", "set", "-t", session_name, "-u", "pane-active-border-style"],
+        ["tmux", "set", "-t", session_name, "-u", "status-left"],
+    ]
+    for cmd in cmds:
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=5)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass

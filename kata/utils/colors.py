@@ -21,7 +21,9 @@ def resolve_color(color: str | None) -> str | None:
     if color is None:
         return None
     if color.startswith("#"):
-        return color
+        if len(color) == 7 and all(c in "0123456789abcdefABCDEF" for c in color[1:]):
+            return color
+        return None
     return COLOR_PRESETS.get(color.lower())
 
 

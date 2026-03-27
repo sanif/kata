@@ -999,6 +999,9 @@ def color(
     if clear:
         project.color = None
         registry.update(project)
+        from kata.services.tmux_style import clear_project_color
+
+        clear_project_color(sanitize_session_name(name))
         console.print(f"[green]✓[/green] Cleared color for [bold]{name}[/bold]")
         return
 
