@@ -48,10 +48,12 @@ def _tmux_session_exists(session_name: str) -> bool:
 def _switch_to_session(project, registry) -> None:
     """Switch to a project's tmux session, launching if needed."""
     from kata.core.config import get_project_config_path, migrate_project_config
+    from kata.services.tmux_style import apply_project_color
 
     session_name = sanitize_session_name(project.name)
 
     if _tmux_session_exists(session_name):
+        apply_project_color(session_name, getattr(project, "color", None))
         subprocess.run(
             ["tmux", "switch-client", "-t", session_name],
             capture_output=True,
@@ -68,6 +70,7 @@ def _switch_to_session(project, registry) -> None:
 
             for _ in range(20):
                 if _tmux_session_exists(session_name):
+                    apply_project_color(session_name, getattr(project, "color", None))
                     subprocess.run(
                         ["tmux", "switch-client", "-t", session_name],
                         capture_output=True,
