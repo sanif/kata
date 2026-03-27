@@ -11,6 +11,7 @@ from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project, SessionStatus
 from kata.services.registry import get_registry
 from kata.services.sessions import get_all_session_statuses
+from kata.utils.colors import resolve_color
 from kata.utils.detection import detect_project_type
 from kata.utils.git import format_git_indicator_rich, get_git_status
 from kata.utils.zoxide import ZoxideEntry
@@ -36,6 +37,40 @@ GROUP_ICONS = {
 
 # File to persist expanded state
 TREE_STATE_FILE = KATA_CONFIG_DIR / "tree_state.json"
+
+
+def _collect_project_labels(
+    projects: list[Project],
+    all_statuses: dict[str, SessionStatus],
+) -> dict[str, str]:
+    """Compute labels for all projects (I/O-heavy, meant for a worker thread)."""
+    labels: dict[str, str] = {}
+    for project in projects:
+        status = all_statuses.get(project.name, SessionStatus.IDLE)
+        # Status indicator
+        indicators = {
+            SessionStatus.ACTIVE: "[green]●[/green]",
+            SessionStatus.DETACHED: "[yellow]●[/yellow]",
+            SessionStatus.IDLE: "[dim]○[/dim]",
+        }
+        indicator = indicators.get(status, "[dim]○[/dim]")
+
+        project_type = detect_project_type(project.path)
+        type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+        git_status = get_git_status(project.path)
+        git_indicator = format_git_indicator_rich(git_status)
+        shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
+        project_color = resolve_color(getattr(project, "color", None))
+        color_bar = f"[{project_color}]┃[/{project_color}] " if project_color else "  "
+        if git_indicator:
+            labels[project.name] = (
+                f"{color_bar}{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
+            )
+        else:
+            labels[project.name] = (
+                f"{color_bar}{indicator} {shortcut_prefix}{type_icon} {project.name}"
+            )
+    return labels
 
 
 class ProjectTree(Widget):
@@ -160,7 +195,9 @@ class ProjectTree(Widget):
             for project in sorted(groups[group_name], key=lambda p: p.name):
                 indicator = self._get_status_indicator(SessionStatus.IDLE)
                 shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
-                label = f"{indicator} {shortcut_prefix}{project.name}"
+                project_color = resolve_color(getattr(project, "color", None))
+                color_bar = f"[{project_color}]┃[/{project_color}] " if project_color else "  "
+                label = f"{color_bar}{indicator} {shortcut_prefix}{project.name}"
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -196,7 +233,7 @@ class ProjectTree(Widget):
                                 from kata.tui.widgets.preview import PreviewPane
 
                                 preview = self.app.query_one(PreviewPane)
-                                preview.update_project(project)
+                                preview.show_project_quick(project)
                             except Exception:
                                 pass
                         return
@@ -236,10 +273,53 @@ class ProjectTree(Widget):
         return indicators.get(status, "[dim]○[/dim]")
 
     def refresh_projects(self) -> None:
-        """Refresh the project tree from registry."""
-        tree = self.query_one("#project-tree", Tree)
+        """Kick off a background refresh — I/O runs in a worker thread."""
 
-        # Capture current expanded state before clearing
+        def _work() -> None:
+            result = self._compute_refresh()
+            if result is not None:
+                self.app.call_from_thread(self._apply_refresh, *result)
+
+        self.run_worker(_work, thread=True, exclusive=True, group="refresh")
+
+    def _compute_refresh(self) -> tuple[list[Project], dict[str, str], set[str]] | None:
+        """Heavy I/O: reload registry, fetch statuses, compute labels (runs in thread)."""
+        try:
+            registry = get_registry()
+            registry.reload()
+            projects = registry.list_all()
+            all_statuses = get_all_session_statuses()
+            labels = _collect_project_labels(projects, all_statuses)
+            current_names = {p.name for p in projects}
+            return projects, labels, current_names
+        except Exception:
+            return None
+
+    def _apply_refresh(
+        self,
+        projects: list[Project],
+        labels: dict[str, str],
+        current_names: set[str],
+    ) -> None:
+        """Apply computed labels to the tree (runs on main thread, no I/O)."""
+        tree = self.query_one("#project-tree", Tree)
+        existing_names = set(self._projects_by_name.keys())
+
+        if current_names == existing_names and tree.root.children:
+            # Fast path: same projects — update labels in-place (cursor preserved)
+            for group_node in tree.root.children:
+                if not (group_node.data and group_node.data.get("type") == "group"):
+                    continue
+                for project_node in group_node.children:
+                    if not (project_node.data and project_node.data.get("type") == "project"):
+                        continue
+                    project = project_node.data["project"]
+                    new_label = labels.get(project.name, "")
+                    if new_label and str(project_node.label) != new_label:
+                        project_node.set_label(new_label)
+            return
+
+        # Slow path: project set changed — full rebuild
         for node in tree.root.children:
             if node.data and node.data.get("type") == "group":
                 group_name = node.data.get("name")
@@ -250,15 +330,6 @@ class ProjectTree(Widget):
 
         tree.clear()
 
-        # Reload registry from disk to pick up external changes (e.g., kata add)
-        registry = get_registry()
-        registry.reload()
-        projects = registry.list_all()
-
-        # Get all session statuses in one batch call (more efficient)
-        all_statuses = get_all_session_statuses()
-
-        # Group projects by group name
         groups: dict[str, list[Project]] = {}
         for project in projects:
             group_name = project.group or "Uncategorized"
@@ -266,10 +337,8 @@ class ProjectTree(Widget):
                 groups[group_name] = []
             groups[group_name].append(project)
 
-        # Sort groups and projects
         self._projects_by_name.clear()
         for group_name in sorted(groups.keys()):
-            # Get group icon
             group_key = group_name.lower()
             group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
             group_label = f"[bold dim]{group_icon} {group_name.upper()}[/bold dim]"
@@ -278,27 +347,7 @@ class ProjectTree(Widget):
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                # Use batched status, fall back to IDLE if not found
-                status = all_statuses.get(project.name, SessionStatus.IDLE)
-                indicator = self._get_status_indicator(status)
-
-                # Get project type icon
-                project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(
-                    project_type.value, PROJECT_TYPE_ICONS["generic"]
-                )
-
-                # Get git status for the project
-                git_status = get_git_status(project.path)
-                git_indicator = format_git_indicator_rich(git_status)
-
-                # Shortcut prefix if assigned
-                shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
-
-                if git_indicator:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
-                else:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
+                label = labels.get(project.name, project.name)
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -391,11 +440,7 @@ class ProjectTree(Widget):
         self._save_expanded_state()
 
     def filter_projects(self, query: str) -> None:
-        """Filter projects by search query.
-
-        Args:
-            query: Search query to filter by (fuzzy match on name)
-        """
+        """Filter projects by search query."""
         if not query:
             self.refresh_projects()
             return
@@ -419,6 +464,10 @@ class ProjectTree(Widget):
                     groups[group_name] = []
                 groups[group_name].append(project)
 
+        # Compute labels
+        all_filtered = [p for g in groups.values() for p in g]
+        labels = _collect_project_labels(all_filtered, all_statuses)
+
         # Build filtered tree
         for group_name in sorted(groups.keys()):
             group_key = group_name.lower()
@@ -429,24 +478,7 @@ class ProjectTree(Widget):
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                status = all_statuses.get(project.name, SessionStatus.IDLE)
-                indicator = self._get_status_indicator(status)
-
-                project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(
-                    project_type.value, PROJECT_TYPE_ICONS["generic"]
-                )
-
-                git_status = get_git_status(project.path)
-                git_indicator = format_git_indicator_rich(git_status)
-
-                # Shortcut prefix if assigned
-                shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
-
-                if git_indicator:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name} [dim]{git_indicator}[/dim]"
-                else:
-                    label = f"{indicator} {shortcut_prefix}{type_icon} {project.name}"
+                label = labels.get(project.name, project.name)
 
                 project_node = group_node.add_leaf(label)
                 project_node.data = {"type": "project", "project": project}
@@ -454,15 +486,7 @@ class ProjectTree(Widget):
         tree.root.expand()
 
     def _fuzzy_match(self, query: str, target: str) -> bool:
-        """Check if query fuzzy matches target.
-
-        Args:
-            query: Search query
-            target: String to match against
-
-        Returns:
-            True if all query characters appear in order in target
-        """
+        """Check if query fuzzy matches target."""
         if not query:
             return True
 
