@@ -67,6 +67,9 @@ class Settings:
     # Per-project: list of project names with notifications disabled
     notifications_disabled_projects: list[str] = field(default_factory=list)
 
+    # Color accent line position in tmux ("top" or "bottom")
+    color_accent_position: str = "top"
+
     def __post_init__(self) -> None:
         """Validate and clamp values."""
         # Clamp refresh_interval to valid range (1-60)
@@ -90,6 +93,10 @@ class Settings:
 
         # Volume: 0.0-1.0
         self.notifications_volume = max(0.0, min(1.0, self.notifications_volume))
+
+        # Color accent position
+        if self.color_accent_position not in ("top", "bottom"):
+            self.color_accent_position = "top"
 
         # Suppression seconds: 0-300
         self.notifications_suppress_question_after_task_seconds = max(
@@ -138,6 +145,7 @@ class Settings:
             ),
             notifications_subagent_stop=data.get("notifications_subagent_stop", False),
             notifications_disabled_projects=data.get("notifications_disabled_projects", []),
+            color_accent_position=data.get("color_accent_position", "top"),
         )
 
 
