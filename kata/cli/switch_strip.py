@@ -340,6 +340,18 @@ def open_switcher_popup(backward: bool = False) -> None:
 
     w, h = _calc_popup_size(projects)
 
+    # pane-border-status steals 1 row from the popup content area
+    # Check if any project color is set (which enables pane-border-status)
+    current_project = None
+    if current:
+        for p in projects:
+            sname = sanitize_session_name(p.name)
+            if p.name == current or sname == current:
+                current_project = p
+                break
+    if current_project and getattr(current_project, "color", None):
+        h += 1
+
     cmd = "kata switch-strip --popup"
     if backward:
         cmd += " --backward"
