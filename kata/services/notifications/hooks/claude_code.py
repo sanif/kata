@@ -21,23 +21,10 @@ from kata.services.notifications.dispatch.state import (
     update_session_state,
 )
 from kata.services.notifications.dispatch.summary import generate_summary
+from kata.services.notifications.hooks.common import resolve_session_name
 from kata.services.notifications.models import NotificationSource, NotificationType
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_session_name(cwd: str) -> str:
-    """Resolve CWD to a Kata project/session name."""
-    try:
-        from kata.services.registry import get_registry
-
-        registry = get_registry()
-        project = registry.find_by_path(cwd)
-        if project:
-            return project.name
-    except Exception:
-        pass
-    return Path(cwd).name if cwd else ""
 
 
 def handle_hook_event(event_type: str, stdin_data: str) -> None:
@@ -108,7 +95,7 @@ def handle_hook_event(event_type: str, stdin_data: str) -> None:
     # 5. Build notification
     summary = generate_summary(last_message) if last_message else ""
     branch = get_git_branch(cwd)
-    session_name = _resolve_session_name(cwd)
+    session_name = resolve_session_name(cwd)
     title = TYPE_TITLES.get(notification_type, "Claude Code Event")
 
     # 6. Dispatch

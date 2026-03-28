@@ -24,7 +24,7 @@ class TestHandleCodexHookEvent:
     @patch("kata.services.notifications.hooks.codex.notify")
     @patch("kata.services.notifications.hooks.codex.generate_summary")
     @patch("kata.services.notifications.hooks.codex.get_git_branch")
-    @patch("kata.services.notifications.hooks.codex._resolve_session_name")
+    @patch("kata.services.notifications.hooks.codex.resolve_session_name")
     @patch("kata.services.notifications.hooks.codex.load_session_state")
     @patch("kata.services.notifications.hooks.codex.is_suppressed")
     @patch("kata.services.notifications.hooks.codex.acquire_lock")

@@ -25,7 +25,7 @@ class TestHandleGeminiHookEvent:
     @patch("kata.services.notifications.hooks.gemini.notify")
     @patch("kata.services.notifications.hooks.gemini.generate_summary")
     @patch("kata.services.notifications.hooks.gemini.get_git_branch")
-    @patch("kata.services.notifications.hooks.gemini._resolve_session_name")
+    @patch("kata.services.notifications.hooks.gemini.resolve_session_name")
     @patch("kata.services.notifications.hooks.gemini.load_session_state")
     @patch("kata.services.notifications.hooks.gemini.is_suppressed")
     @patch("kata.services.notifications.hooks.gemini.acquire_lock")
