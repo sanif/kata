@@ -33,9 +33,9 @@ from kata.utils.zoxide import ZoxideEntry
 logger = logging.getLogger(__name__)
 
 KATA_BANNER_LINES = [
-    "[#22d3ee]╺┃╸[/]  [#38bdf8]╱ ╲[/]   [#818cf8]━┳━[/]  [#a78bfa]╱ ╲[/]",
-    "[#22d3ee]┣┛[/]   [#38bdf8]╱━━╲[/]   [#818cf8] ┃[/]   [#a78bfa]╱━━╲[/]",
-    "[#22d3ee]╹ ╲[/]  [#38bdf8]╵  ╵[/]   [#818cf8] ╹[/]   [#a78bfa]╵  ╵[/]",
+    "[#22d3ee]█▄▀[/]  [#38bdf8]▄▀▄[/]  [#818cf8]▀█▀[/]  [#a78bfa]▄▀▄[/]",
+    "[#22d3ee]█ █[/]  [#38bdf8]█▀█[/]   [#818cf8]█[/]   [#a78bfa]█▀█[/]",
+    "[#22d3ee]▀ ▀[/]  [#38bdf8]▀ ▀[/]   [#818cf8]▀[/]   [#a78bfa]▀ ▀[/]",
 ]
 
 
