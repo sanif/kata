@@ -222,8 +222,8 @@ def _calc_popup_size(projects):
     max_name_len = max(len(p.name) for p in projects) if projects else 10
     # "│ " (2) + "┃" (1) + " " (1) + dot (1) + " " (1) + name + pad + " │" (2)
     # Also need room for hint bar: "  C-␣ next   ↵ go   esc quit" = 29 chars + borders
-    hint_w = 33  # hint text + border chrome
-    w = max(hint_w, max_name_len + 12)
+    hint_w = 37  # hint text + border chrome
+    w = max(hint_w, max_name_len + 16)
     # top(1) + spacer(1) + projects(N) + spacer(1) + sep(1) + hint(1) + bottom(1)
     h = len(projects) + 6
     return w, h
