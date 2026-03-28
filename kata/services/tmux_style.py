@@ -1,4 +1,8 @@
-"""Apply per-project color styling to tmux sessions."""
+"""Apply per-project color styling to tmux sessions.
+
+Uses pane-border-status to show a thin colored line at the top of each pane.
+This is visible even with a single pane, unlike regular pane borders.
+"""
 
 import subprocess
 
@@ -8,7 +12,8 @@ from kata.utils.colors import hex_to_256, resolve_color
 def apply_project_color(session_name: str, color: str | None) -> None:
     """Apply project color to a tmux session's styling.
 
-    Sets pane border colors and status-left segment background.
+    Enables pane-border-status at top with a colored format line,
+    and sets pane border colors. Visible even with a single pane.
     No-op if color is None or unresolvable.
     """
     hex_color = resolve_color(color)
@@ -19,15 +24,28 @@ def apply_project_color(session_name: str, color: str | None) -> None:
     color_str = f"colour{color_256}"
 
     cmds = [
-        ["tmux", "set", "-t", session_name, "pane-border-style", f"fg={color_str}"],
-        ["tmux", "set", "-t", session_name, "pane-active-border-style", f"fg={color_str}"],
+        # Show border status line at top of each pane
+        ["tmux", "set", "-t", session_name, "pane-border-status", "top"],
+        # Format the top line as a colored bar with session name
         [
             "tmux",
             "set",
             "-t",
             session_name,
-            "status-left",
-            f"#[bg={color_str},fg=black,bold] #S #[default] ",
+            "pane-border-format",
+            f"#[bg={color_str},fg=black,bold] #S #[default]#[fg={color_str}]"
+            + "─" * 200
+            + "#[default]",
+        ],
+        # Color the pane borders themselves
+        ["tmux", "set", "-t", session_name, "pane-border-style", f"fg={color_str}"],
+        [
+            "tmux",
+            "set",
+            "-t",
+            session_name,
+            "pane-active-border-style",
+            f"fg={color_str}",
         ],
     ]
 
@@ -41,9 +59,10 @@ def apply_project_color(session_name: str, color: str | None) -> None:
 def clear_project_color(session_name: str) -> None:
     """Reset tmux session styling to defaults."""
     cmds = [
+        ["tmux", "set", "-t", session_name, "-u", "pane-border-status"],
+        ["tmux", "set", "-t", session_name, "-u", "pane-border-format"],
         ["tmux", "set", "-t", session_name, "-u", "pane-border-style"],
         ["tmux", "set", "-t", session_name, "-u", "pane-active-border-style"],
-        ["tmux", "set", "-t", session_name, "-u", "status-left"],
     ]
     for cmd in cmds:
         try:
