@@ -252,10 +252,8 @@ class KataDashboard(App):
         self._refresh_timer = self.set_interval(
             float(settings.refresh_interval), self._refresh_status
         )
-        # Trigger immediate status refresh on startup after first paint
-        self.call_after_refresh(self._initial_status_refresh)
-        # Update preview with first project after tree loads and status is updated
-        self.set_timer(0.3, self._show_first_project)
+        # Kick off first background refresh immediately (non-blocking)
+        self.call_after_refresh(self._refresh_status)
 
         # Prune old notifications on TUI startup
         try:
@@ -266,22 +264,6 @@ class KataDashboard(App):
                 max_age_days=settings.notifications_retention_days,
                 max_count=settings.notifications_max_count,
             )
-        except Exception:
-            pass
-
-    def _initial_status_refresh(self) -> None:
-        """Refresh status after initial UI render."""
-        # Small delay to ensure tmux server is accessible
-        self.set_timer(0.05, self._refresh_status)
-
-    def _show_first_project(self) -> None:
-        """Show the first project in the preview pane."""
-        try:
-            tree = self.query_one(ProjectTree)
-            project = tree.get_selected_project()
-            if project:
-                preview = self.query_one(PreviewPane)
-                preview.update_project(project)
         except Exception:
             pass
 
@@ -401,7 +383,7 @@ class KataDashboard(App):
 
     def _on_context_menu_result(self, result: str | None) -> None:
         """Handle context menu result."""
-        if result in ("deleted", "renamed", "moved", "shortcut_changed"):
+        if result in ("deleted", "renamed", "moved", "shortcut_changed", "color_changed"):
             # Refresh the tree after modifications
             try:
                 tree = self.query_one(ProjectTree)

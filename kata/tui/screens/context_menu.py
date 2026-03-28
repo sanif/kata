@@ -36,6 +36,7 @@ class MenuAction(Enum):
     SAVE_LAYOUT = auto()
     SET_SHORTCUT = auto()
     TOGGLE_NOTIFICATIONS = auto()
+    SET_COLOR = auto()
 
 
 class ContextMenuScreen(ModalScreen[str | None]):
@@ -49,7 +50,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
     ContextMenuScreen #menu-container {
         width: 40;
         height: auto;
-        max-height: 18;
+        max-height: 20;
         background: $surface;
         border: round $surface-lighten-2;
         padding: 1 2;
@@ -93,6 +94,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("l", "save_layout", "Save Layout", show=False),
         Binding("s", "set_shortcut", "Set Shortcut", show=False),
         Binding("n", "toggle_notifications", "Toggle Notifications", show=False),
+        Binding("c", "set_color", "Set Color", show=False),
     ]
 
     # Allow pre-selecting an action when opening
@@ -134,6 +136,15 @@ class ContextMenuScreen(ModalScreen[str | None]):
             notif_indicator = "[dim]○[/dim]" if notif_disabled else "[green]●[/green]"
             notif_label = f"[dim]n[/dim]  {notif_indicator} Notifications"
 
+            # Color indicator
+            from kata.utils.colors import resolve_color
+
+            project_color = resolve_color(getattr(self.project, "color", None))
+            if project_color:
+                color_label = f"[dim]c[/dim]  [{project_color}]██[/{project_color}] Set Color"
+            else:
+                color_label = "[dim]c[/dim]  󰏘 Set Color"
+
             options = [
                 Option("[dim]k[/dim]  󰅖 Kill Session", id="kill"),
                 Option("[dim]d[/dim]  󰆴 Delete Project", id="delete"),
@@ -143,6 +154,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 Option("[dim]l[/dim]  󰈙 Save Layout", id="save_layout"),
                 Option(shortcut_label, id="set_shortcut"),
                 Option(notif_label, id="toggle_notifications"),
+                Option(color_label, id="set_color"),
             ]
             yield OptionList(*options, id="menu-list")
 
@@ -159,6 +171,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 MenuAction.SAVE_LAYOUT: 5,
                 MenuAction.SET_SHORTCUT: 6,
                 MenuAction.TOGGLE_NOTIFICATIONS: 7,
+                MenuAction.SET_COLOR: 8,
             }
             index = action_to_index.get(self.preselected_action, 0)
             try:
@@ -187,6 +200,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_set_shortcut()
         elif self.preselected_action == MenuAction.TOGGLE_NOTIFICATIONS:
             self.action_toggle_notifications()
+        elif self.preselected_action == MenuAction.SET_COLOR:
+            self.action_set_color()
 
     @on(OptionList.OptionSelected)
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -208,6 +223,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.action_set_shortcut()
         elif option_id == "toggle_notifications":
             self.action_toggle_notifications()
+        elif option_id == "set_color":
+            self.action_set_color()
 
     def action_cancel(self) -> None:
         """Cancel and close the menu."""
@@ -458,6 +475,45 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.app.notify(f"Notifications disabled for {project_name}", title="Notifications")
 
         self.dismiss("notifications_toggled")
+
+    def action_set_color(self) -> None:
+        """Set or clear the project's color."""
+        self.app.push_screen(
+            ColorSelectorDialog(
+                current_color=self.project.color,
+                project_name=self.project.name,
+            ),
+            self._on_color_selected,
+        )
+
+    def _on_color_selected(self, color: str | None) -> None:
+        """Handle color selection."""
+        # None means cancelled, "clear" means remove color
+        if color is None:
+            return
+
+        try:
+            registry = get_registry()
+
+            if color == "clear":
+                self.project.color = None
+                registry.update(self.project)
+                from kata.services.tmux_style import clear_project_color
+
+                clear_project_color(sanitize_session_name(self.project.name))
+                self.app.notify("Color cleared", title="Success")
+            else:
+                self.project.color = color
+                registry.update(self.project)
+                from kata.services.tmux_style import apply_project_color
+
+                apply_project_color(sanitize_session_name(self.project.name), color)
+                self.app.notify(f"Color set to: {color}", title="Success")
+
+            self.dismiss("color_changed")
+        except Exception as e:
+            self.app.notify(f"Failed to set color: {e}", severity="error")
+            self.dismiss(None)
 
     def _on_shortcut_selected(self, shortcut: int | None) -> None:
         """Handle shortcut selection."""
@@ -912,3 +968,93 @@ class ShortcutSelectorDialog(ModalScreen[int | None]):
 
     def action_select_9(self) -> None:
         self.dismiss(9)
+
+
+class ColorSelectorDialog(ModalScreen[str | None]):
+    """Dialog for selecting a project color from presets."""
+
+    CSS = """
+    ColorSelectorDialog {
+        align: center middle;
+    }
+
+    ColorSelectorDialog #dialog-container {
+        width: 40;
+        height: auto;
+        max-height: 22;
+        background: $surface;
+        border: round $surface-lighten-2;
+        padding: 1 2;
+    }
+
+    ColorSelectorDialog #dialog-title {
+        text-style: bold;
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    ColorSelectorDialog #color-list {
+        height: auto;
+        max-height: 16;
+        background: $surface;
+    }
+
+    ColorSelectorDialog #color-list > .option-list--option-highlighted {
+        background: $primary 20%;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        current_color: str | None,
+        project_name: str,
+        *args,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.current_color = current_color
+        self.project_name = project_name
+
+    def compose(self) -> ComposeResult:
+        from kata.utils.colors import COLOR_PRESETS, resolve_color
+
+        current_hex = resolve_color(self.current_color)
+
+        with Container(id="dialog-container"):
+            yield Static("Set Color", id="dialog-title")
+
+            options = []
+            highlight_index = None
+            for i, (name, hex_val) in enumerate(COLOR_PRESETS.items()):
+                marker = "● " if hex_val == current_hex else "  "
+                options.append(Option(f"{marker}[{hex_val}]██[/{hex_val}]  {name}", id=name))
+                if hex_val == current_hex:
+                    highlight_index = i
+
+            options.append(Option("  ○  Clear color", id="clear"))
+
+            yield OptionList(*options, id="color-list")
+
+            self._highlight_index = highlight_index
+
+    def on_mount(self) -> None:
+        if self._highlight_index is not None:
+            try:
+                option_list = self.query_one("#color-list", OptionList)
+                option_list.highlighted = self._highlight_index
+            except Exception:
+                pass
+
+    @on(OptionList.OptionSelected)
+    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id == "clear":
+            self.dismiss("clear")
+        elif event.option.id:
+            self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
