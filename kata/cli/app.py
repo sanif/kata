@@ -1277,6 +1277,14 @@ def setup() -> None:
     run_setup()
 
 
+@app.command("uninstall")
+def uninstall() -> None:
+    """Interactive uninstaller — remove hooks, keybindings, data, and package."""
+    from kata.cli.uninstall_tui import run_uninstall
+
+    run_uninstall()
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Kata - Terminal-centric workspace orchestrator for tmux.
