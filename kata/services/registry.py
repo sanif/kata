@@ -48,7 +48,7 @@ class Registry:
         self._load()
 
     def _save(self) -> None:
-        """Save registry to disk."""
+        """Save registry to disk using atomic write."""
         ensure_config_dirs()
 
         data: dict[str, Any] = {
@@ -56,7 +56,15 @@ class Registry:
             "projects": [p.to_dict() for p in self._projects.values()],
         }
 
-        REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        content = json.dumps(data, indent=2, ensure_ascii=False)
+        temp_file = REGISTRY_FILE.with_suffix(".tmp")
+        try:
+            temp_file.write_text(content, encoding="utf-8")
+            temp_file.rename(REGISTRY_FILE)
+        except Exception:
+            if temp_file.exists():
+                temp_file.unlink()
+            raise
 
     def add(self, project: Project) -> None:
         """Add a project to the registry.
@@ -142,6 +150,38 @@ class Registry:
             List of all projects
         """
         return list(self._projects.values())
+
+    def get_recent_projects(
+        self,
+        limit: int = 5,
+        current_session: str | None = None,
+    ) -> list[Project]:
+        """Get most recently opened projects in Alt+Tab order.
+
+        Args:
+            limit: Maximum number of projects to return
+            current_session: Current session name; if provided, its project
+                is moved to position 1 (so position 0 is the "previous" project)
+
+        Returns:
+            List of projects sorted by last_opened descending, with None last
+        """
+        from datetime import datetime
+
+        from kata.utils.paths import sanitize_session_name
+
+        sorted_projects = sorted(
+            self._projects.values(),
+            key=lambda p: (p.last_opened or datetime.min,),
+            reverse=True,
+        )
+        if current_session and len(sorted_projects) >= 2:
+            for i, p in enumerate(sorted_projects):
+                if p.name == current_session or sanitize_session_name(p.name) == current_session:
+                    sorted_projects.pop(i)
+                    sorted_projects.insert(1, p)
+                    break
+        return sorted_projects[:limit]
 
     def list_by_group(self, group: str) -> list[Project]:
         """List projects in a specific group.

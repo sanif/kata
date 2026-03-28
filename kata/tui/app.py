@@ -1,12 +1,16 @@
 """TUI application for Kata dashboard."""
 
+import logging
+
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.timer import Timer
-from textual.widgets import Footer, Header, Static
+from textual.widget import Widget
+from textual.widgets import Footer, Static
 
+from kata import __version__
 from kata.core.models import Project
 from kata.core.settings import get_settings, reload_settings
 from kata.services.registry import get_registry
@@ -15,14 +19,75 @@ from kata.services.sessions import (
     launch_or_attach_adhoc,
 )
 from kata.tui.screens.context_menu import ContextMenuScreen, MenuAction
+from kata.tui.screens.notification_center import NotificationCenterModal
 from kata.tui.screens.search import SearchModal
 from kata.tui.screens.settings import SettingsScreen
+from kata.tui.screens.switcher import SwitcherModal
 from kata.tui.screens.wizard import AddWizard
 from kata.tui.themes import KATA_THEMES
 from kata.tui.widgets.preview import PreviewPane
 from kata.tui.widgets.recents import RecentsPanel
 from kata.tui.widgets.tree import ProjectTree
 from kata.utils.zoxide import ZoxideEntry
+
+logger = logging.getLogger(__name__)
+
+KATA_BANNER_LINES = [
+    "[#22d3ee]█▄▀[/]  [#38bdf8]▄▀▄[/]  [#818cf8]▀█▀[/]  [#a78bfa]▄▀▄[/]",
+    "[#22d3ee]█ █[/]  [#38bdf8]█▀█[/]   [#818cf8]█[/]   [#a78bfa]█▀█[/]",
+    "[#22d3ee]▀ ▀[/]  [#38bdf8]▀ ▀[/]   [#818cf8]▀[/]   [#a78bfa]▀ ▀[/]",
+]
+
+
+class KataBanner(Widget):
+    """Custom ASCII art header banner with circuit-node aesthetic."""
+
+    DEFAULT_CSS = """
+    KataBanner {
+        dock: top;
+        width: 100%;
+        height: 6;
+        background: $background;
+        border-bottom: tall $surface-lighten-1;
+    }
+
+    KataBanner #banner-art {
+        width: 100%;
+        height: 3;
+        margin-top: 1;
+        content-align: center middle;
+        text-align: center;
+    }
+
+    KataBanner #banner-version {
+        width: 100%;
+        height: 1;
+        content-align: center middle;
+        text-align: center;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, version: str = "") -> None:
+        super().__init__()
+        self._version = version
+        self._badge_count = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static("\n".join(KATA_BANNER_LINES), id="banner-art", markup=True)
+        yield Static(f"v{self._version}", id="banner-version")
+
+    def update_badge(self, count: int) -> None:
+        """Update the notification badge count."""
+        self._badge_count = count
+        try:
+            version_widget = self.query_one("#banner-version", Static)
+            if count > 0:
+                version_widget.update(f"v{self._version}  │  󰂚 {count}")
+            else:
+                version_widget.update(f"v{self._version}")
+        except Exception:
+            pass
 
 
 class EmptyState(Static):
@@ -49,7 +114,7 @@ class KataDashboard(App):
     """Main TUI application for Kata."""
 
     TITLE = "▸ kata"
-    SUB_TITLE = "workspace orchestrator"
+    SUB_TITLE = f"v{__version__}"
     ENABLE_COMMAND_PALETTE = False
 
     # Register custom Kata themes
@@ -71,18 +136,6 @@ class KataDashboard(App):
         background: $background;
     }
 
-    Header {
-        dock: top;
-        height: 1;
-        background: $background;
-        color: $text-muted;
-    }
-
-    Header HeaderTitle {
-        color: $primary;
-        text-style: bold;
-    }
-
     #main-container {
         width: 100%;
         height: 100%;
@@ -94,7 +147,7 @@ class KataDashboard(App):
     }
 
     #tree-container {
-        width: 35;
+        width: 38;
         height: 100%;
         border-right: vkey $surface-lighten-1;
     }
@@ -102,14 +155,14 @@ class KataDashboard(App):
     #preview-container {
         width: 1fr;
         height: 100%;
-        padding: 1 2;
+        padding: 1 3;
     }
 
     #recents-container {
         width: 100%;
         height: 12;
         display: block;
-        border-top: solid $surface-lighten-1;
+        border-top: tall $surface-lighten-1;
     }
 
     #recents-container.-hidden {
@@ -128,7 +181,7 @@ class KataDashboard(App):
     }
 
     Footer > .footer--key {
-        background: transparent;
+        background: $surface;
         color: $primary;
         text-style: bold;
     }
@@ -148,9 +201,11 @@ class KataDashboard(App):
         Binding("?", "help", "Help"),
         Binding("m", "context_menu", "Menu"),
         Binding("s", "settings", "Settings"),
+        Binding("n", "notifications", "Notifs"),
         Binding("k", "quick_kill", "Kill", show=False),
         Binding("d", "quick_delete", "Delete", show=False),
         Binding("tab", "switch_section", "Switch Section", show=False),
+        Binding("ctrl+at", "quick_switch", "Switch", show=False),
         Binding("[", "focus_projects", "Projects"),
         Binding("]", "focus_recents", "Recents"),
         Binding("1", "launch_shortcut_1", "1", show=False),
@@ -169,10 +224,12 @@ class KataDashboard(App):
     _refresh_timer: Timer | None = None
     _explicit_quit: bool = False
     _focus_on_recents: bool = False
+    _notification_badge_count: int = 0
+    _session_to_switch: str | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the dashboard."""
-        yield Header()
+        yield KataBanner(version=__version__)
 
         registry = get_registry()
         if len(registry) == 0:
@@ -198,24 +255,18 @@ class KataDashboard(App):
         self._refresh_timer = self.set_interval(
             float(settings.refresh_interval), self._refresh_status
         )
-        # Trigger immediate status refresh on startup after first paint
-        self.call_after_refresh(self._initial_status_refresh)
-        # Update preview with first project after tree loads and status is updated
-        self.set_timer(0.3, self._show_first_project)
+        # Kick off first background refresh immediately (non-blocking)
+        self.call_after_refresh(self._refresh_status)
 
-    def _initial_status_refresh(self) -> None:
-        """Refresh status after initial UI render."""
-        # Small delay to ensure tmux server is accessible
-        self.set_timer(0.05, self._refresh_status)
-
-    def _show_first_project(self) -> None:
-        """Show the first project in the preview pane."""
+        # Prune old notifications on TUI startup
         try:
-            tree = self.query_one(ProjectTree)
-            project = tree.get_selected_project()
-            if project:
-                preview = self.query_one(PreviewPane)
-                preview.update_project(project)
+            from kata.services.notifications.store import get_notification_store
+
+            store = get_notification_store()
+            store.prune(
+                max_age_days=settings.notifications_retention_days,
+                max_count=settings.notifications_max_count,
+            )
         except Exception:
             pass
 
@@ -231,6 +282,19 @@ class KataDashboard(App):
             preview.refresh_status()
             tree = self.query_one(ProjectTree)
             tree.refresh_projects()
+        except Exception:
+            pass
+
+        # Refresh notification badge count
+        try:
+            from kata.services.notifications.store import get_notification_store
+
+            store = get_notification_store()
+            count = store.unread_count()
+            if count != self._notification_badge_count:
+                self._notification_badge_count = count
+                banner = self.query_one(KataBanner)
+                banner.update_badge(count)
         except Exception:
             pass
 
@@ -322,7 +386,7 @@ class KataDashboard(App):
 
     def _on_context_menu_result(self, result: str | None) -> None:
         """Handle context menu result."""
-        if result in ("deleted", "renamed", "moved", "shortcut_changed"):
+        if result in ("deleted", "renamed", "moved", "shortcut_changed", "color_changed"):
             # Refresh the tree after modifications
             try:
                 tree = self.query_one(ProjectTree)
@@ -337,6 +401,21 @@ class KataDashboard(App):
     def _on_settings_closed(self, result: None) -> None:
         """Handle settings screen close."""
         pass
+
+    def action_notifications(self) -> None:
+        """Open notification center."""
+        # Guard against re-entry (key propagation while modal is already open)
+        if any(isinstance(s, NotificationCenterModal) for s in self.screen_stack):
+            return
+        self.push_screen(NotificationCenterModal(), self._on_notification_result)
+
+    def _on_notification_result(self, result: str | None) -> None:
+        """Handle notification center result (session name to switch to)."""
+        if result is None:
+            return
+        # Store session name and exit — switch happens after app.run() returns
+        self._session_to_switch = result
+        self.exit()
 
     def action_switch_section(self) -> None:
         """Switch focus between projects tree and recents section."""
@@ -365,6 +444,20 @@ class KataDashboard(App):
             self._focus_on_recents = True
         except Exception:
             pass
+
+    def action_quick_switch(self) -> None:
+        """Open the quick project switcher."""
+        self.push_screen(SwitcherModal(), self._on_switcher_result)
+
+    def _on_switcher_result(self, result: Project | None) -> None:
+        """Handle switcher modal result."""
+        if result is None:
+            return
+        result.record_open()
+        registry = get_registry()
+        registry.update(result)
+        self._project_to_launch = result
+        self.exit()
 
     def _launch_by_shortcut(self, shortcut: int) -> None:
         """Launch project by shortcut number."""
@@ -564,17 +657,25 @@ def run_dashboard() -> None:
     app = KataDashboard()
     app.run()
 
-    # After the app exits, launch the selected project or zoxide entry
+    # After the app exits, launch the selected project, zoxide entry, or switch session
     project = app._project_to_launch
     zoxide_entry = app._zoxide_to_launch
+    session_to_switch = app._session_to_switch
 
     if project:
         try:
             launch_or_attach(project)
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception:
+            logger.error("Failed to launch project %s", project.name, exc_info=True)
     elif zoxide_entry:
         try:
             launch_or_attach_adhoc(zoxide_entry.path)
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception:
+            logger.error("Failed to launch adhoc session for %s", zoxide_entry.path, exc_info=True)
+    elif session_to_switch:
+        try:
+            from kata.services.sessions import attach_session
+
+            attach_session(session_to_switch)
+        except Exception:
+            logger.error("Failed to switch to session %s", session_to_switch, exc_info=True)

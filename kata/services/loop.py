@@ -63,6 +63,15 @@ def run_with_loop() -> None:
                     print(f"\n[Kata] Error: {e}")
                     print("[Kata] Press Enter to continue...")
                     input()
+            elif app._session_to_switch:
+                try:
+                    from kata.services.sessions import attach_session
+
+                    attach_session(app._session_to_switch)
+                except Exception as e:
+                    print(f"\n[Kata] Error: {e}")
+                    print("[Kata] Press Enter to continue...")
+                    input()
 
             # Small delay before re-launching
             import time

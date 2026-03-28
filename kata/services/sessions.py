@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kata.core.config import get_project_config_path, migrate_project_config
+from kata.core.constants import (
+    SESSION_NAME_MAX_SUFFIX,
+    SESSION_READY_MAX_RETRIES,
+    SESSION_READY_POLL_INTERVAL,
+    SUBPROCESS_TIMEOUT,
+    SUBPROCESS_TIMEOUT_SHORT,
+)
 from kata.core.models import Project, SessionStatus
 from kata.utils.paths import sanitize_session_name
 
 if TYPE_CHECKING:
     import libtmux
+
+logger = logging.getLogger(__name__)
 
 
 class SessionError(Exception):
@@ -96,6 +106,7 @@ def get_session_status(session_name: str) -> SessionStatus:
             return SessionStatus.ACTIVE
         return SessionStatus.DETACHED
     except Exception:
+        logger.debug("Failed to get session status for %s", session_name, exc_info=True)
         return SessionStatus.IDLE
 
 
@@ -115,7 +126,7 @@ def get_all_session_statuses() -> dict[str, SessionStatus]:
             ["tmux", "list-sessions", "-F", "#{session_name}|#{session_attached}"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
 
         if result.returncode != 0:
@@ -145,6 +156,26 @@ def is_inside_tmux() -> bool:
         True if inside tmux, False otherwise
     """
     return bool(os.environ.get("TMUX"))
+
+
+def get_current_tmux_session() -> str | None:
+    """Get the name of the current tmux session, if any.
+
+    Returns:
+        Session name string, or None if not in a tmux session.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#S"],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_SHORT,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
 
 
 def launch_session(project: Project) -> None:
@@ -190,7 +221,7 @@ def _get_tmux_client() -> str | None:
             ["tmux", "display-message", "-p", "#{client_tty}"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -269,22 +300,26 @@ def launch_or_attach(project: Project) -> None:
     """
     import time
 
+    from kata.services.tmux_style import apply_project_color
+
     session_name = sanitize_session_name(project.name)
     if session_exists(session_name):
+        apply_project_color(session_name, project.color)
         attach_session(session_name)
     else:
         launch_session(project)
         # Wait for session to be ready (tmuxp may take a moment)
         session_ready = False
-        for _ in range(20):
+        for _ in range(SESSION_READY_MAX_RETRIES):
             if session_exists(session_name):
                 session_ready = True
                 break
-            time.sleep(0.1)
+            time.sleep(SESSION_READY_POLL_INTERVAL)
 
         if not session_ready:
             raise SessionError(f"Session '{project.name}' failed to start within timeout")
 
+        apply_project_color(session_name, project.color)
         attach_session(session_name)
 
 
@@ -302,7 +337,7 @@ def _generate_unique_session_name(base_name: str) -> str:
         return base_name
 
     # Try with numeric suffixes
-    for i in range(1, 100):
+    for i in range(1, SESSION_NAME_MAX_SUFFIX):
         candidate = f"{base_name}-{i}"
         if not session_exists(candidate):
             return candidate
@@ -405,11 +440,11 @@ def launch_or_attach_adhoc(directory: str) -> None:
         session_name = launch_adhoc_session(directory)
         # Wait for session to be ready
         session_ready = False
-        for _ in range(20):
+        for _ in range(SESSION_READY_MAX_RETRIES):
             if session_exists(session_name):
                 session_ready = True
                 break
-            time.sleep(0.1)
+            time.sleep(SESSION_READY_POLL_INTERVAL)
 
         if not session_ready:
             raise SessionError(f"Session '{session_name}' failed to start within timeout")
@@ -511,7 +546,7 @@ def get_session_layout(session_name: str) -> dict | None:
             ["tmux", "display-message", "-t", session_name, "-p", "#{session_path}"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         start_dir = result.stdout.strip() if result.returncode == 0 else ""
 
@@ -527,7 +562,7 @@ def get_session_layout(session_name: str) -> dict | None:
             ],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
 
         if result.returncode != 0:
@@ -556,7 +591,7 @@ def get_session_layout(session_name: str) -> dict | None:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
             )
 
             panes: list[dict[str, Any]] = []
@@ -566,7 +601,7 @@ def get_session_layout(session_name: str) -> dict | None:
                     ["ps", "-eo", "pid,ppid,args"],
                     capture_output=True,
                     text=True,
-                    timeout=5,
+                    timeout=SUBPROCESS_TIMEOUT,
                 )
                 ps_lines = ps_result.stdout.strip().split("\n") if ps_result.returncode == 0 else []
 
@@ -641,6 +676,7 @@ def get_session_layout(session_name: str) -> dict | None:
         }
 
     except (subprocess.TimeoutExpired, Exception):
+        logger.debug("Failed to capture session layout for %s", session_name, exc_info=True)
         return None
 
 

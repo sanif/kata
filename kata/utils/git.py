@@ -4,6 +4,22 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
+
+
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess | None:
+    """Run a git command and return the result, or None on failure."""
+    try:
+        return subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
 
 @dataclass
 class GitStatus:
@@ -34,17 +50,8 @@ def is_git_repository(path: Path | str) -> bool:
         True if path is a git repository
     """
     path = Path(path).resolve()
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0 and result.stdout.strip() == "true"
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return False
+    result = _run_git(["rev-parse", "--is-inside-work-tree"], path)
+    return result is not None and result.returncode == 0 and result.stdout.strip() == "true"
 
 
 def get_branch_name(path: Path | str) -> str | None:
@@ -57,43 +64,23 @@ def get_branch_name(path: Path | str) -> str | None:
         Branch name or None if not a git repo or detached HEAD
     """
     path = Path(path).resolve()
-    try:
-        # First try symbolic-ref for normal branch
-        result = subprocess.run(
-            ["git", "symbolic-ref", "--short", "HEAD"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
 
-        # Fall back to describe for detached HEAD
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return f"tag:{result.stdout.strip()}"
+    # First try symbolic-ref for normal branch
+    result = _run_git(["symbolic-ref", "--short", "HEAD"], path)
+    if result and result.returncode == 0:
+        return result.stdout.strip()
 
-        # Last resort: short SHA
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return f"({result.stdout.strip()})"
+    # Fall back to describe for detached HEAD
+    result = _run_git(["describe", "--tags", "--exact-match", "HEAD"], path)
+    if result and result.returncode == 0:
+        return f"tag:{result.stdout.strip()}"
 
-        return None
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
+    # Last resort: short SHA
+    result = _run_git(["rev-parse", "--short", "HEAD"], path)
+    if result and result.returncode == 0:
+        return f"({result.stdout.strip()})"
+
+    return None
 
 
 def is_dirty(path: Path | str) -> bool:
@@ -106,18 +93,9 @@ def is_dirty(path: Path | str) -> bool:
         True if there are uncommitted changes (staged, unstaged, or untracked)
     """
     path = Path(path).resolve()
-    try:
-        # Check for any changes (staged, unstaged, or untracked)
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0 and bool(result.stdout.strip())
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return False
+    # Check for any changes (staged, unstaged, or untracked)
+    result = _run_git(["status", "--porcelain"], path)
+    return result is not None and result.returncode == 0 and bool(result.stdout.strip())
 
 
 def get_git_status(path: Path | str) -> GitStatus:
@@ -137,54 +115,41 @@ def get_git_status(path: Path | str) -> GitStatus:
     status = GitStatus(is_git_repo=True)
     status.branch = get_branch_name(path)
 
-    try:
-        # Get detailed status
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.strip().split("\n"):
-                if not line:
-                    continue
-                # Status format: XY filename
-                # X = index status, Y = work tree status
-                x_status = line[0] if len(line) > 0 else " "
-                y_status = line[1] if len(line) > 1 else " "
+    # Get detailed status
+    result = _run_git(["status", "--porcelain"], path)
+    if result and result.returncode == 0:
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            # Status format: XY filename
+            # X = index status, Y = work tree status
+            x_status = line[0] if len(line) > 0 else " "
+            y_status = line[1] if len(line) > 1 else " "
 
-                # Check for staged changes (index)
-                if x_status not in (" ", "?"):
-                    status.has_staged = True
+            # Check for staged changes (index)
+            if x_status not in (" ", "?"):
+                status.has_staged = True
 
-                # Check for unstaged changes (work tree)
-                if y_status not in (" ", "?"):
-                    status.has_unstaged = True
+            # Check for unstaged changes (work tree)
+            if y_status not in (" ", "?"):
+                status.has_unstaged = True
 
-                # Check for untracked files
-                if x_status == "?" and y_status == "?":
-                    status.has_untracked = True
+            # Check for untracked files
+            if x_status == "?" and y_status == "?":
+                status.has_untracked = True
 
-        status.is_dirty = status.has_staged or status.has_unstaged or status.has_untracked
+    status.is_dirty = status.has_staged or status.has_unstaged or status.has_untracked
 
-        # Get ahead/behind count
-        result = subprocess.run(
-            ["git", "rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
+    # Get ahead/behind count
+    result = _run_git(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], path)
+    if result and result.returncode == 0:
+        try:
             parts = result.stdout.strip().split()
             if len(parts) == 2:
                 status.behind = int(parts[0])
                 status.ahead = int(parts[1])
-
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
-        pass
+        except ValueError:
+            pass
 
     return status
 

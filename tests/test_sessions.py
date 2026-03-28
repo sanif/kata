@@ -139,7 +139,10 @@ class TestLaunchSession:
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0)
                 launch_session(project)
-                mock_run.assert_called_once()
+                # First call should be tmuxp load
+                args = mock_run.call_args_list[0][0][0]
+                assert "tmuxp" in args
+                assert "load" in args
 
     def test_launch_config_not_found(self, tmp_path):
         """Test launch when config file missing."""
@@ -227,8 +230,8 @@ class TestKillSession:
         with patch("kata.services.sessions.session_exists", return_value=True):
             with patch("subprocess.run") as mock_run:
                 kill_session("test-session")
-                mock_run.assert_called_once()
-                args = mock_run.call_args[0][0]
+                # First call should be tmux kill-session
+                args = mock_run.call_args_list[0][0][0]
                 assert "kill-session" in args
 
     def test_kill_session_not_found(self):

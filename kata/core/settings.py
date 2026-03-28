@@ -2,7 +2,7 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from kata.core.config import KATA_CONFIG_DIR
@@ -23,6 +23,10 @@ AVAILABLE_THEMES = [
     "kata-warm",
     "kata-glass",
     "kata-glass-light",
+    "kata-rose",
+    "kata-nord",
+    "kata-mono",
+    "kata-ember",
 ]
 
 
@@ -35,6 +39,35 @@ class Settings:
     refresh_interval: int = 5
     theme: str = "kata-dark"
 
+    # Notification settings
+    notifications_enabled: bool = True
+    notifications_os_enabled: bool = True
+    notifications_retention_days: int = 7
+    notifications_max_count: int = 500
+    notifications_terminal_app: str = "auto"
+
+    # Sound (new)
+    notifications_sound_enabled: bool = True
+    notifications_sound_pack: str = "default"
+    notifications_volume: float = 1.0
+    notifications_sounds: dict[str, str] = field(default_factory=dict)
+
+    # Suppression cooldowns
+    notifications_suppress_question_after_task_seconds: int = 12
+    notifications_suppress_question_after_any_seconds: int = 12
+    notifications_suppress_duplicate_seconds: int = 5
+
+    # Classification (new)
+    notifications_subagent_stop: bool = False
+
+    # Per-project: list of project names with notifications disabled
+    notifications_disabled_projects: list[str] = field(default_factory=list)
+
+    # Color accent line position in tmux ("top" or "bottom")
+    color_accent_position: str = "top"
+    # Show colored accent line border in tmux when project has a color
+    color_accent_enabled: bool = True
+
     def __post_init__(self) -> None:
         """Validate and clamp values."""
         # Clamp refresh_interval to valid range (1-60)
@@ -44,19 +77,46 @@ class Settings:
         if self.theme not in AVAILABLE_THEMES:
             self.theme = "kata-dark"
 
+        # Clamp notification settings
+        self.notifications_retention_days = max(1, min(365, self.notifications_retention_days))
+        self.notifications_max_count = max(10, min(10000, self.notifications_max_count))
+        # Sound pack validation
+        valid_packs = ("default", "gentle", "arcade", "arabic", "zen", "funk")
+        if self.notifications_sound_pack not in valid_packs:
+            self.notifications_sound_pack = "default"
+
+        # Volume: 0.0-1.0
+        self.notifications_volume = max(0.0, min(1.0, self.notifications_volume))
+
+        # Color accent position
+        if self.color_accent_position not in ("top", "bottom"):
+            self.color_accent_position = "top"
+
+        # Suppression seconds: 0-300
+        self.notifications_suppress_question_after_task_seconds = max(
+            0, min(300, self.notifications_suppress_question_after_task_seconds)
+        )
+        self.notifications_suppress_question_after_any_seconds = max(
+            0, min(300, self.notifications_suppress_question_after_any_seconds)
+        )
+        self.notifications_suppress_duplicate_seconds = max(
+            0, min(300, self.notifications_suppress_duplicate_seconds)
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize settings to dictionary."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
-        """Deserialize settings from dictionary."""
-        return cls(
-            loop_enabled=data.get("loop_enabled", False),
-            default_group=data.get("default_group", "Uncategorized"),
-            refresh_interval=data.get("refresh_interval", 5),
-            theme=data.get("theme", "default"),
-        )
+        """Deserialize settings from dictionary.
+
+        Only passes keys that match dataclass fields, using each field's
+        default for any missing key. This avoids duplicating defaults.
+        """
+        valid_fields = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
 
 
 def _migrate_from_legacy() -> Settings | None:

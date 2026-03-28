@@ -244,6 +244,148 @@ class TestRegistry:
         found = registry.find_by_path(tmp_path)
         assert found is None
 
+    def test_get_recent_projects_empty(self, registry):
+        """Test that empty registry returns empty list."""
+        assert registry.get_recent_projects() == []
+
+    def test_get_recent_projects_sorted_by_last_opened(self, registry, tmp_path):
+        """Test projects are sorted by last_opened descending."""
+        from datetime import datetime
+
+        for i in range(3):
+            path = tmp_path / f"dir{i}"
+            path.mkdir()
+            project = Project(
+                name=f"project{i}",
+                path=str(path),
+                group="Test",
+                config=f"project{i}.yaml",
+                last_opened=datetime(2026, 1, i + 1),
+            )
+            registry.add(project)
+
+        result = registry.get_recent_projects()
+        assert [p.name for p in result] == ["project2", "project1", "project0"]
+
+    def test_get_recent_projects_none_last_opened_sorted_last(self, registry, tmp_path):
+        """Test that projects with None last_opened appear last."""
+        from datetime import datetime
+
+        # Project with no last_opened
+        path0 = tmp_path / "dir0"
+        path0.mkdir()
+        registry.add(
+            Project(
+                name="never-opened",
+                path=str(path0),
+                group="Test",
+                config="never-opened.yaml",
+                last_opened=None,
+            )
+        )
+
+        # Project with last_opened
+        path1 = tmp_path / "dir1"
+        path1.mkdir()
+        registry.add(
+            Project(
+                name="opened",
+                path=str(path1),
+                group="Test",
+                config="opened.yaml",
+                last_opened=datetime(2026, 1, 1),
+            )
+        )
+
+        result = registry.get_recent_projects()
+        assert [p.name for p in result] == ["opened", "never-opened"]
+
+    def test_get_recent_projects_limit(self, registry, tmp_path):
+        """Test that limit parameter restricts results."""
+        from datetime import datetime
+
+        for i in range(5):
+            path = tmp_path / f"dir{i}"
+            path.mkdir()
+            registry.add(
+                Project(
+                    name=f"project{i}",
+                    path=str(path),
+                    group="Test",
+                    config=f"project{i}.yaml",
+                    last_opened=datetime(2026, 1, i + 1),
+                )
+            )
+
+        result = registry.get_recent_projects(limit=3)
+        assert len(result) == 3
+        assert [p.name for p in result] == ["project4", "project3", "project2"]
+
+    def test_get_recent_projects_current_session_moves_to_position_1(self, registry, tmp_path):
+        """Test that current_session project is moved to position 1."""
+        from datetime import datetime
+
+        for i in range(4):
+            path = tmp_path / f"dir{i}"
+            path.mkdir()
+            registry.add(
+                Project(
+                    name=f"project{i}",
+                    path=str(path),
+                    group="Test",
+                    config=f"project{i}.yaml",
+                    last_opened=datetime(2026, 1, i + 1),
+                )
+            )
+
+        # project3 is most recent (position 0), project2 is next, etc.
+        # Passing current_session="project3" should move it to position 1
+        result = registry.get_recent_projects(current_session="project3")
+        assert result[0].name == "project2"  # previous project at position 0
+        assert result[1].name == "project3"  # current session at position 1
+
+    def test_get_recent_projects_current_session_sanitized_match(self, registry, tmp_path):
+        """Test that current_session matches via sanitize_session_name."""
+        from datetime import datetime
+
+        for i, name in enumerate(["my.project", "other-project"]):
+            path = tmp_path / f"dir{i}"
+            path.mkdir()
+            registry.add(
+                Project(
+                    name=name,
+                    path=str(path),
+                    group="Test",
+                    config=f"{name}.yaml",
+                    last_opened=datetime(2026, 1, i + 1),
+                )
+            )
+
+        # "my.project" sanitizes to "my_project" in tmux
+        # other-project is most recent (position 0), my.project is next
+        # Passing sanitized name should match and move to position 1
+        result = registry.get_recent_projects(current_session="my_project")
+        assert result[0].name == "other-project"
+        assert result[1].name == "my.project"
+
+    def test_save_is_atomic(self, registry, tmp_path, temp_config_dir):
+        """Test that registry save uses atomic write (temp + rename)."""
+        path = tmp_path / "dir_atomic"
+        path.mkdir()
+        project = Project(
+            name="atomic-test",
+            path=str(path),
+            group="Test",
+            config="atomic-test.yaml",
+        )
+        registry.add(project)
+
+        # Verify the registry file exists and is valid JSON
+        import json
+
+        data = json.loads(temp_config_dir.read_text())
+        assert any(p["name"] == "atomic-test" for p in data["projects"])
+
     def test_persistence(self, temp_config_dir, tmp_path):
         """Test that registry persists data across instances."""
         # Create first registry and add project

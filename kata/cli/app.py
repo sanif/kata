@@ -16,6 +16,7 @@ from kata.services.registry import (
 from kata.services.sessions import (
     SessionError,
     get_all_kata_sessions,
+    get_current_tmux_session,
     get_session_status,
     kill_session,
     launch_or_attach,
@@ -699,14 +700,33 @@ def _build_switch_items(
     Returns items formatted with ANSI colors and icons:
       - Cyan: registered Kata projects
       - Yellow: directories from zoxide
+
+    Projects are sorted by last opened (most recent first), with the
+    current tmux session pushed to second position so the previous
+    project is at the cursor for quick switching.
     """
+    from datetime import datetime
+
     registry = get_registry()
+    registry.reload()
     projects = registry.list_all()
 
     items: list[str] = []
 
-    # Add registered projects with icon (cyan)
-    for p in sorted(projects, key=lambda p: (p.group, p.name)):
+    # Sort by last opened (most recent first)
+    sorted_projects = sorted(projects, key=lambda p: (p.last_opened or datetime.min,), reverse=True)
+
+    # Move current session from first to second so the previous project
+    # is at the fzf cursor (Alt+Tab style switching)
+    current_session = get_current_tmux_session()
+    if current_session and len(sorted_projects) >= 2:
+        for i, p in enumerate(sorted_projects):
+            if p.name == current_session or sanitize_session_name(p.name) == current_session:
+                sorted_projects.pop(i)
+                sorted_projects.insert(1, p)
+                break
+
+    for p in sorted_projects:
         items.append(f"{_CYAN}  {p.name}{_RESET}")
 
     # Add zoxide entries if enabled and available
@@ -923,6 +943,108 @@ def switch_preview(
     console.print(f"[cyan]Last:[/cyan]    {last_opened}")
 
 
+@app.command("switch-strip", hidden=True)
+def switch_strip_cmd(
+    backward: bool = typer.Option(False, "--backward", "-b", help="Cycle backward"),
+    popup: bool = typer.Option(False, "--popup", hidden=True, help="Run inside popup"),
+) -> None:
+    """Quick project switcher for tmux overlay.
+
+    When called directly, spawns a correctly-sized tmux popup.
+    The popup runs this command again with --popup for the interactive UI.
+    """
+    from kata.cli.switch_strip import open_switcher_popup, run_switch_strip
+
+    if popup:
+        run_switch_strip(backward=backward)
+    else:
+        open_switcher_popup(backward=backward)
+
+
+@app.command("_apply-color", hidden=True)
+def apply_color_cmd(
+    session_name: str = typer.Argument(...),
+    color_value: str | None = typer.Argument(None),
+    clear: bool = typer.Option(False, "--clear"),
+) -> None:
+    """Internal: apply or clear tmux color styling (called via tmux run-shell)."""
+    from kata.services.tmux_style import apply_project_color, clear_project_color
+
+    if clear:
+        clear_project_color(session_name)
+    elif color_value:
+        apply_project_color(session_name, color_value)
+
+
+@app.command()
+def color(
+    name: str | None = typer.Argument(None, help="Project name"),
+    color_value: str | None = typer.Argument(None, help="Color preset name or hex code"),
+    list_presets: bool = typer.Option(False, "--list", "-l", help="List available color presets"),
+    clear: bool = typer.Option(False, "--clear", "-c", help="Remove color from project"),
+) -> None:
+    """Set, view, or clear a project's color indicator.
+
+    Examples:
+        kata color --list              # Show available presets
+        kata color myproject blue      # Set color
+        kata color myproject "#FF5733" # Set hex color
+        kata color myproject --clear   # Remove color
+        kata color myproject           # Show current color
+    """
+    from kata.utils.colors import COLOR_PRESETS, resolve_color
+
+    if list_presets:
+        console.print("[bold]Available color presets:[/bold]\n")
+        for preset_name, hex_val in COLOR_PRESETS.items():
+            console.print(f"  [{hex_val}]██[/{hex_val}]  {preset_name:<10} {hex_val}")
+        return
+
+    if not name:
+        console.print("[red]Error:[/red] Provide a project name or use --list")
+        raise typer.Exit(1)
+
+    registry = get_registry()
+    try:
+        project = registry.get(name)
+    except ProjectNotFoundError:
+        console.print(f"[red]Error:[/red] Project not found: {name}")
+        raise typer.Exit(1)
+
+    if clear:
+        project.color = None
+        registry.update(project)
+        from kata.services.tmux_style import clear_project_color
+
+        clear_project_color(sanitize_session_name(name))
+        console.print(f"[green]✓[/green] Cleared color for [bold]{name}[/bold]")
+        return
+
+    if color_value is None:
+        # Show current color
+        if project.color:
+            hex_val = resolve_color(project.color) or project.color
+            console.print(f"[{hex_val}]██[/{hex_val}]  {project.color}")
+        else:
+            console.print(f"[dim]No color set for {name}[/dim]")
+        return
+
+    # Validate color
+    resolved = resolve_color(color_value)
+    if resolved is None:
+        console.print(f"[red]Error:[/red] Unknown color: {color_value}")
+        console.print(
+            "Use a preset name or hex code (#RRGGBB). Run [bold]kata color --list[/bold] to see presets."
+        )
+        raise typer.Exit(1)
+
+    project.color = color_value
+    registry.update(project)
+    console.print(
+        f"[green]✓[/green] Set [bold]{name}[/bold] color to [{resolved}]██[/{resolved}]  {color_value}"
+    )
+
+
 @app.command()
 def migrate() -> None:
     """Migrate configs from legacy location to project folders.
@@ -950,6 +1072,217 @@ def migrate() -> None:
             console.print(f"  [dim]○[/dim] {name} [dim](already migrated or not found)[/dim]")
 
     console.print(f"\n[bold]Done![/bold] Migrated: {migrated}, Skipped: {skipped}")
+
+
+# --- Notification daemon commands ---
+
+
+@app.command("notifyd-start")
+def notifyd_start() -> None:
+    """Start the notification daemon in the background."""
+    from kata.services.notifications.daemon import is_daemon_running, run_daemon
+
+    if is_daemon_running():
+        console.print("[yellow]Notification daemon is already running.[/yellow]")
+        return
+
+    import multiprocessing
+
+    p = multiprocessing.Process(target=run_daemon, daemon=True)
+    p.start()
+    console.print(f"[green]✓[/green] Notification daemon started (PID: {p.pid})")
+
+
+@app.command("notifyd-stop")
+def notifyd_stop() -> None:
+    """Stop the notification daemon."""
+    from kata.services.notifications.daemon import is_daemon_running, stop_daemon
+
+    if not is_daemon_running():
+        console.print("[dim]Notification daemon is not running.[/dim]")
+        return
+
+    if stop_daemon():
+        console.print("[green]✓[/green] Notification daemon stopped.")
+    else:
+        console.print("[red]Failed to stop daemon.[/red]")
+
+
+@app.command("notifyd-status")
+def notifyd_status() -> None:
+    """Check notification daemon status."""
+    from kata.services.notifications.daemon import is_daemon_running
+
+    if is_daemon_running():
+        console.print("[green]●[/green] Notification daemon is running.")
+    else:
+        console.print("[dim]●[/dim] Notification daemon is not running.")
+
+
+# --- Notification management commands ---
+
+
+@app.command("notifications")
+def notifications_cmd(
+    action: str = typer.Argument("list", help="list, unread, clear, dismiss-all"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max notifications to show"),
+) -> None:
+    """View and manage notifications."""
+    from kata.services.notifications.models import NotificationStatus
+    from kata.services.notifications.store import get_notification_store
+
+    store = get_notification_store()
+
+    if action == "list":
+        notifications = store.list_all(limit=limit)
+        if not notifications:
+            console.print("[dim]No notifications.[/dim]")
+            return
+
+        type_icons = {
+            "task_complete": "✅",
+            "question": "❓",
+            "plan_ready": "📋",
+            "review_done": "🔍",
+            "error": "❌",
+            "session_limit": "⏱️",
+            "session_launched": "🚀",
+            "session_detached": "💤",
+            "session_attached": "👋",
+            "session_killed": "💀",
+            "routine_complete": "☀️",
+        }
+
+        table = Table(title="Notifications", show_lines=False)
+        table.add_column("", width=2)
+        table.add_column("Time", style="dim", width=16)
+        table.add_column("Title", min_width=20)
+        table.add_column("Summary", style="dim", min_width=30, max_width=50)
+        table.add_column("Session", style="cyan", width=15)
+        table.add_column("Status", width=8)
+
+        for n in notifications:
+            icon = type_icons.get(n.type.value, "🔔")
+            time_str = n.timestamp.strftime("%m-%d %H:%M")
+            status_str = (
+                "[bold]● NEW[/bold]" if n.status == NotificationStatus.UNREAD else "[dim]○[/dim]"
+            )
+            body_preview = n.body.strip().split("\n")[0][:50] if n.body else ""
+            table.add_row(icon, time_str, n.title, body_preview, n.session_name or "", status_str)
+
+        console.print(table)
+        unread = store.unread_count()
+        if unread > 0:
+            console.print(f"\n[bold]{unread}[/bold] unread")
+
+    elif action == "unread":
+        notifications = store.list_by_status(NotificationStatus.UNREAD)
+        if not notifications:
+            console.print("[dim]No unread notifications.[/dim]")
+            return
+        for n in notifications:
+            console.print(f"  [{n.type.value}] {n.title} ({n.session_name})")
+
+    elif action in ("clear", "dismiss-all"):
+        store.dismiss_all()
+        console.print("[green]✓[/green] All notifications dismissed.")
+
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command("notify-popup", hidden=True)
+def notify_popup(
+    popup: bool = typer.Option(False, "--popup", hidden=True, help="Run inside popup"),
+) -> None:
+    """Open interactive notification center (used by tmux popup).
+
+    When called directly, spawns a correctly-sized tmux popup.
+    The popup runs this command again with --popup for the interactive UI.
+    """
+    from kata.cli.notify_strip import open_notify_popup, run_notify_popup
+
+    if popup:
+        run_notify_popup()
+    else:
+        open_notify_popup()
+
+
+# --- Hook handler commands (called by Claude Code / Gemini / Codex / tmux) ---
+
+
+@app.command("notify-hook", hidden=True)
+def notify_hook(
+    event_type: str = typer.Argument(
+        help="Hook type: Claude (stop/subagent-stop/pre-tool-use/notification), Gemini (after-agent/before-tool/notification/session-end), Codex (codex)"
+    ),
+    payload: str | None = typer.Argument(None, help="Optional JSON payload (Codex notify hook)"),
+) -> None:
+    """Handle Claude Code, Gemini CLI, or Codex hook events."""
+    import sys
+
+    stdin_data = sys.stdin.read()
+    if not stdin_data.strip() and payload:
+        stdin_data = payload
+
+    if event_type == "codex":
+        from kata.services.notifications.hooks.codex import handle_hook_event as handle_codex
+
+        handle_codex(stdin_data)
+    # Gemini event types use hyphens; Claude uses hyphens too in notify-hook
+    elif event_type in ("after-agent", "before-tool", "session-end"):
+        from kata.services.notifications.hooks.gemini import handle_hook_event as handle_gemini
+
+        handle_gemini(event_type, stdin_data)
+    elif event_type == "notification":
+        # Can be either, but let's check for Gemini fields
+        import json
+
+        try:
+            data = json.loads(stdin_data)
+            if "hook_event_name" in data:
+                from kata.services.notifications.hooks.gemini import (
+                    handle_hook_event as handle_gemini,
+                )
+
+                handle_gemini(event_type, stdin_data)
+            else:
+                from kata.services.notifications.hooks.claude_code import (
+                    handle_hook_event as handle_claude,
+                )
+
+                handle_claude(event_type, stdin_data)
+        except Exception:
+            # Fallback to Claude
+            from kata.services.notifications.hooks.claude_code import (
+                handle_hook_event as handle_claude,
+            )
+
+            handle_claude(event_type, stdin_data)
+    else:
+        # stop, subagent-stop, pre-tool-use
+        from kata.services.notifications.hooks.claude_code import (
+            handle_hook_event as handle_claude,
+        )
+
+        handle_claude(event_type, stdin_data)
+
+
+@app.command("setup")
+def setup() -> None:
+    """Interactive setup for Kata integrations (hooks, keybindings)."""
+    from kata.cli.setup_tui import run_setup
+
+    run_setup()
+
+
+@app.command("uninstall")
+def uninstall() -> None:
+    """Interactive uninstaller — remove hooks, keybindings, data, and package."""
+    from kata.cli.uninstall_tui import run_uninstall
+
+    run_uninstall()
 
 
 @app.callback(invoke_without_command=True)
