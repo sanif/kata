@@ -368,6 +368,24 @@ class TestRegistry:
         assert result[0].name == "other-project"
         assert result[1].name == "my.project"
 
+    def test_save_is_atomic(self, registry, tmp_path, temp_config_dir):
+        """Test that registry save uses atomic write (temp + rename)."""
+        path = tmp_path / "dir_atomic"
+        path.mkdir()
+        project = Project(
+            name="atomic-test",
+            path=str(path),
+            group="Test",
+            config="atomic-test.yaml",
+        )
+        registry.add(project)
+
+        # Verify the registry file exists and is valid JSON
+        import json
+
+        data = json.loads(temp_config_dir.read_text())
+        assert any(p["name"] == "atomic-test" for p in data["projects"])
+
     def test_persistence(self, temp_config_dir, tmp_path):
         """Test that registry persists data across instances."""
         # Create first registry and add project

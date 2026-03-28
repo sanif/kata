@@ -48,7 +48,7 @@ class Registry:
         self._load()
 
     def _save(self) -> None:
-        """Save registry to disk."""
+        """Save registry to disk using atomic write."""
         ensure_config_dirs()
 
         data: dict[str, Any] = {
@@ -56,7 +56,15 @@ class Registry:
             "projects": [p.to_dict() for p in self._projects.values()],
         }
 
-        REGISTRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        content = json.dumps(data, indent=2, ensure_ascii=False)
+        temp_file = REGISTRY_FILE.with_suffix(".tmp")
+        try:
+            temp_file.write_text(content, encoding="utf-8")
+            temp_file.rename(REGISTRY_FILE)
+        except Exception:
+            if temp_file.exists():
+                temp_file.unlink()
+            raise
 
     def add(self, project: Project) -> None:
         """Add a project to the registry.
