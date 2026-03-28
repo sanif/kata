@@ -194,8 +194,11 @@ class NotificationDaemon:
 
         logger.info(f"Notification daemon started on {NOTIFYD_SOCKET}")
 
-        async with self._server:
-            await self._server.serve_forever()
+        try:
+            async with self._server:
+                await self._server.serve_forever()
+        finally:
+            self.stop()
 
     def stop(self) -> None:
         """Stop the daemon server."""
