@@ -526,18 +526,18 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
     @staticmethod
     def _apply_tmux_color(session_name: str, color: str) -> None:
-        """Apply tmux color via tmux run-shell to avoid Textual terminal conflicts."""
+        """Apply tmux color via tmux run-shell with full Python path."""
         try:
-            import shutil
+            import sys
 
-            kata_path = shutil.which("kata") or "kata"
+            python = sys.executable
+            cmd = (
+                f'{python} -c "'
+                f"from kata.services.tmux_style import apply_project_color; "
+                f"apply_project_color('{session_name}', '{color}')\""
+            )
             subprocess.run(
-                [
-                    "tmux",
-                    "run-shell",
-                    "-b",
-                    f"{kata_path} _apply-color {session_name} {color}",
-                ],
+                ["tmux", "run-shell", "-b", cmd],
                 capture_output=True,
                 timeout=5,
             )
@@ -546,18 +546,18 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
     @staticmethod
     def _apply_tmux_clear(session_name: str) -> None:
-        """Clear tmux color via tmux run-shell to avoid Textual terminal conflicts."""
+        """Clear tmux color via tmux run-shell with full Python path."""
         try:
-            import shutil
+            import sys
 
-            kata_path = shutil.which("kata") or "kata"
+            python = sys.executable
+            cmd = (
+                f'{python} -c "'
+                f"from kata.services.tmux_style import clear_project_color; "
+                f"clear_project_color('{session_name}')\""
+            )
             subprocess.run(
-                [
-                    "tmux",
-                    "run-shell",
-                    "-b",
-                    f"{kata_path} _apply-color {session_name} --clear",
-                ],
+                ["tmux", "run-shell", "-b", cmd],
                 capture_output=True,
                 timeout=5,
             )
