@@ -26,6 +26,7 @@ from kata.services.notifications.models import (
     Notification,
     NotificationStatus,
 )
+from kata.services.notifications.store import NotificationStore
 from kata.utils.notifications import TYPE_ICONS, escape_rich, load_grouped, time_ago
 
 # ── Data ────────────────────────────────────────────────────────────────
@@ -48,12 +49,6 @@ def _get_full_body(n: Notification) -> str:
         return body.strip()
     title = getattr(n, "title", "") or ""
     return title if isinstance(title, str) else str(title)
-
-
-def _get_store():
-    from kata.services.notifications.store import NotificationStore
-
-    return NotificationStore()
 
 
 # ── Project item ────────────────────────────────────────────────────────
@@ -555,11 +550,8 @@ def run_notify_popup() -> None:
                     if notifs and 0 <= notif_cursor < len(notifs):
                         nid = notifs[notif_cursor].id
                         try:
-                            store = _get_store()
-                            try:
+                            with NotificationStore() as store:
                                 store.dismiss(nid)
-                            finally:
-                                store.close()
                         except Exception:
                             pass
                         grouped, projects, total_unread = _reload_state()
@@ -574,11 +566,8 @@ def run_notify_popup() -> None:
                     # Dismiss all notifications for project
                     session = projects[cursor].session_name
                     try:
-                        store = _get_store()
-                        try:
+                        with NotificationStore() as store:
                             store.dismiss_by_session(session)
-                        finally:
-                            store.close()
                     except Exception:
                         pass
                     grouped, projects, total_unread = _reload_state()
@@ -589,11 +578,8 @@ def run_notify_popup() -> None:
                     notif_cursor = 0
             elif key == "dismiss_all":
                 try:
-                    store = _get_store()
-                    try:
+                    with NotificationStore() as store:
                         store.dismiss_all()
-                    finally:
-                        store.close()
                 except Exception:
                     pass
                 grouped, projects, total_unread = _reload_state()
@@ -609,11 +595,8 @@ def run_notify_popup() -> None:
                     if notifs and 0 <= notif_cursor < len(notifs):
                         nid = notifs[notif_cursor].id
                         try:
-                            store = _get_store()
-                            try:
+                            with NotificationStore() as store:
                                 store.update_status(nid, NotificationStatus.READ)
-                            finally:
-                                store.close()
                         except Exception:
                             pass
                         grouped, projects, total_unread = _reload_state()
@@ -623,11 +606,8 @@ def run_notify_popup() -> None:
                     # Mark all for project read
                     session = projects[cursor].session_name
                     try:
-                        store = _get_store()
-                        try:
+                        with NotificationStore() as store:
                             store.mark_session_read(session)
-                        finally:
-                            store.close()
                     except Exception:
                         pass
                     grouped, projects, total_unread = _reload_state()
@@ -637,11 +617,8 @@ def run_notify_popup() -> None:
                         cursor = max(0, len(projects) - 1)
             elif key == "read_all":
                 try:
-                    store = _get_store()
-                    try:
+                    with NotificationStore() as store:
                         store.mark_all_read()
-                    finally:
-                        store.close()
                 except Exception:
                     pass
                 grouped, projects, total_unread = _reload_state()
@@ -666,11 +643,8 @@ def run_notify_popup() -> None:
     if confirmed and projects:
         session_name = projects[cursor].session_name
         try:
-            store = _get_store()
-            try:
+            with NotificationStore() as store:
                 store.mark_session_read(session_name)
-            finally:
-                store.close()
         except Exception:
             pass
         subprocess.run(

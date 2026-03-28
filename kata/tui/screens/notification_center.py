@@ -16,6 +16,7 @@ from kata.services.notifications.models import (
     NotificationStatus,
     NotificationType,
 )
+from kata.services.notifications.store import NotificationStore
 from kata.utils.notifications import TYPE_ICONS, escape_rich, load_grouped, time_ago
 
 # Short type labels for expanded view
@@ -288,11 +289,6 @@ class NotificationCenterModal(ModalScreen[str | None]):
             pass
         return None
 
-    def _get_store(self):
-        from kata.services.notifications.store import NotificationStore
-
-        return NotificationStore()
-
     def action_cancel(self) -> None:
         self.dismiss(None)
 
@@ -338,11 +334,8 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
         # Mark notifications read for this session
         try:
-            store = self._get_store()
-            try:
+            with NotificationStore() as store:
                 store.mark_session_read(session_name)
-            finally:
-                store.close()
         except Exception:
             pass
 
@@ -354,25 +347,19 @@ class NotificationCenterModal(ModalScreen[str | None]):
             return
 
         try:
-            store = self._get_store()
-            try:
+            with NotificationStore() as store:
                 if data["type"] == "project":
                     store.dismiss_by_session(data["session_name"])
                 elif data["type"] == "notification":
                     store.dismiss(data["notification_id"])
-            finally:
-                store.close()
         except Exception:
             pass
         self._refresh_list()
 
     def action_dismiss_all(self) -> None:
         try:
-            store = self._get_store()
-            try:
+            with NotificationStore() as store:
                 store.dismiss_all()
-            finally:
-                store.close()
         except Exception:
             pass
         self._refresh_list()
@@ -383,25 +370,19 @@ class NotificationCenterModal(ModalScreen[str | None]):
             return
 
         try:
-            store = self._get_store()
-            try:
+            with NotificationStore() as store:
                 if data["type"] == "project":
                     store.mark_session_read(data["session_name"])
                 elif data["type"] == "notification":
                     store.update_status(data["notification_id"], NotificationStatus.READ)
-            finally:
-                store.close()
         except Exception:
             pass
         self._refresh_list()
 
     def action_mark_all_read(self) -> None:
         try:
-            store = self._get_store()
-            try:
+            with NotificationStore() as store:
                 store.mark_all_read()
-            finally:
-                store.close()
         except Exception:
             pass
         self._refresh_list()

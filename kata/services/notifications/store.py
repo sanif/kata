@@ -69,6 +69,12 @@ class NotificationStore:
         """Close the database connection."""
         self._conn.close()
 
+    def __enter__(self) -> NotificationStore:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     def add(self, notification: Notification) -> None:
         """Add a notification to the store."""
         d = notification.to_dict()

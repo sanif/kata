@@ -54,10 +54,7 @@ def load_grouped() -> dict[str, list[Notification]]:
     try:
         from kata.services.notifications.store import NotificationStore
 
-        store = NotificationStore()
-        try:
+        with NotificationStore() as store:
             return store.list_grouped_by_session()
-        finally:
-            store.close()
     except Exception:
         return {}
