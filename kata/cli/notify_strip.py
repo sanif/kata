@@ -14,6 +14,7 @@ import subprocess
 import sys
 import termios
 import tty
+from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
 
@@ -60,12 +61,12 @@ def _get_store():
 _MAX_PROJECTS = 15
 
 
+@dataclass
 class _Project:
-    def __init__(self, session_name: str, unread: int, total: int, time_str: str):
-        self.session_name = session_name
-        self.unread = unread
-        self.total = total
-        self.time_str = time_str
+    session_name: str
+    unread: int
+    total: int
+    time_str: str
 
 
 def _build_projects(grouped: dict[str, list[Notification]]) -> list[_Project]:

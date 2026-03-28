@@ -64,15 +64,19 @@ def update_session_state(session_id: str, notification_type: NotificationType) -
     state.last_by_type[notification_type.value] = now
 
     path = _state_path(session_id)
+    data = {
+        "session_id": session_id,
+        "last_notification_type": notification_type.value,
+        "last_notification_time": now.isoformat(),
+        "last_by_type": {k: v.isoformat() for k, v in state.last_by_type.items()},
+    }
+    temp_file = path.with_suffix(".tmp")
     try:
-        data = {
-            "session_id": session_id,
-            "last_notification_type": notification_type.value,
-            "last_notification_time": now.isoformat(),
-            "last_by_type": {k: v.isoformat() for k, v in state.last_by_type.items()},
-        }
-        path.write_text(json.dumps(data))
+        temp_file.write_text(json.dumps(data))
+        temp_file.rename(path)
     except Exception:
+        if temp_file.exists():
+            temp_file.unlink()
         logger.debug("Failed to save session state", exc_info=True)
 
 
