@@ -231,8 +231,7 @@ def capture_switch_strip(output_dir: Path):
 
 def capture_notify_strip(output_dir: Path):
     """Capture the Ctrl+N notification popup."""
-
-    from kata.cli.notify_strip import _build_projects, render_panel
+    from kata.cli.notify_strip import _PANEL_W, _build_projects, render_panel
     from kata.services.notifications.models import (
         Notification,
         NotificationSource,
@@ -274,7 +273,7 @@ def capture_notify_strip(output_dir: Path):
                 type=NotificationType.PLAN_READY,
                 source=NotificationSource.CLAUDE_CODE,
                 title="Plan Ready",
-                body="Implementation plan for notification sound system ready for review",
+                body="Implementation plan for notification sound system",
                 session_name="kata",
                 timestamp=datetime.now() - timedelta(minutes=30),
             ),
@@ -290,7 +289,7 @@ def capture_notify_strip(output_dir: Path):
                 type=NotificationType.ERROR,
                 source=NotificationSource.CLAUDE_CODE,
                 title="Error",
-                body="Test test_daemon_broadcast failed: asyncio.TimeoutError",
+                body="Test test_daemon_broadcast failed: TimeoutError",
                 session_name="kata",
                 timestamp=datetime.now() - timedelta(hours=2),
             ),
@@ -298,9 +297,8 @@ def capture_notify_strip(output_dir: Path):
     }
 
     projects = _build_projects(mock_notifications)
-    w = 72
-    content_rows = max(len(projects), max(len(v) for v in mock_notifications.values())) + 2
-    content_rows = min(content_rows, 10)
+    # Use the actual panel width constant
+    content_rows = 8
 
     lines = render_panel(
         projects=projects,
@@ -310,7 +308,9 @@ def capture_notify_strip(output_dir: Path):
         content_rows=content_rows,
     )
 
-    _rich_lines_to_svg(lines, w, title="notifications", output_path=output_dir / "notify_popup.svg")
+    _rich_lines_to_svg(
+        lines, _PANEL_W, title="notifications", output_path=output_dir / "notify_popup.svg"
+    )
     print(f"  Saved: {output_dir / 'notify_popup.svg'}")
 
 
@@ -367,11 +367,24 @@ async def capture_tui_screens(output_dir: Path):
             await pilot.press("escape")
             await asyncio.sleep(0.3)
 
-            # 4. Context menu — need to select a project first
-            await pilot.press("down")  # Move into tree
-            await asyncio.sleep(0.2)
+            # 4. Context menu — navigate into tree, expand group, select project
+            try:
+                from textual.widgets import Tree as TextualTree
+
+                tree_widget = app.query_one("#project-tree", TextualTree)
+                # Expand root and first group
+                tree_widget.root.expand_all()
+                await asyncio.sleep(0.3)
+                # Move cursor to first project (root -> group -> project)
+                if tree_widget.root.children:
+                    first_group = tree_widget.root.children[0]
+                    if first_group.children:
+                        tree_widget.cursor_line = first_group.children[0].line
+                        await asyncio.sleep(0.2)
+            except Exception:
+                pass
             await pilot.press("m")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
             app.save_screenshot(str(output_dir / "context_menu.svg"))
             print(f"  Saved: {output_dir / 'context_menu.svg'}")
             await pilot.press("escape")
