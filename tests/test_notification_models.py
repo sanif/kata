@@ -201,21 +201,17 @@ class TestNotificationSettings:
         s = Settings()
         assert s.notifications_enabled is True
         assert s.notifications_os_enabled is True
-        assert s.notifications_sound == "Glass"
         assert s.notifications_retention_days == 7
         assert s.notifications_max_count == 500
-        assert s.notifications_claude_code_hooks is True
-        assert s.notifications_tmux_hooks is True
-        assert s.notifications_suppression_seconds == 5
         assert s.notifications_terminal_app == "auto"
 
     def test_serialization_roundtrip(self):
         from kata.core.settings import Settings
 
-        s = Settings(notifications_sound="Ping", notifications_max_count=100)
+        s = Settings(notifications_sound_pack="gentle", notifications_max_count=100)
         d = s.to_dict()
         s2 = Settings.from_dict(d)
-        assert s2.notifications_sound == "Ping"
+        assert s2.notifications_sound_pack == "gentle"
         assert s2.notifications_max_count == 100
 
     def test_retention_days_clamping(self):

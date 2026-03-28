@@ -42,12 +42,8 @@ class Settings:
     # Notification settings
     notifications_enabled: bool = True
     notifications_os_enabled: bool = True
-    notifications_sound: str = "Glass"
     notifications_retention_days: int = 7
     notifications_max_count: int = 500
-    notifications_claude_code_hooks: bool = True
-    notifications_tmux_hooks: bool = True
-    notifications_suppression_seconds: int = 5
     notifications_terminal_app: str = "auto"
 
     # Sound (new)
@@ -56,7 +52,7 @@ class Settings:
     notifications_volume: float = 1.0
     notifications_sounds: dict[str, str] = field(default_factory=dict)
 
-    # Suppression (new — replaces notifications_suppression_seconds)
+    # Suppression cooldowns
     notifications_suppress_question_after_task_seconds: int = 12
     notifications_suppress_question_after_any_seconds: int = 12
     notifications_suppress_duplicate_seconds: int = 5
@@ -84,10 +80,6 @@ class Settings:
         # Clamp notification settings
         self.notifications_retention_days = max(1, min(365, self.notifications_retention_days))
         self.notifications_max_count = max(10, min(10000, self.notifications_max_count))
-        self.notifications_suppression_seconds = max(
-            0, min(300, self.notifications_suppression_seconds)
-        )
-
         # Sound pack validation
         valid_packs = ("default", "gentle", "arcade", "arabic", "zen", "funk")
         if self.notifications_sound_pack not in valid_packs:
