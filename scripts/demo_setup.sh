@@ -110,40 +110,51 @@ setup() {
 
     echo -e "  ${GREEN}✓${NC} Created 8 project directories with git repos"
 
-    # Register projects with kata
-    cd "$DEMO_ROOT"
-    kata add "$DEMO_ROOT/work/api-gateway" -g "Work" 2>/dev/null
-    kata add "$DEMO_ROOT/work/dashboard-ui" -g "Work" 2>/dev/null
-    kata add "$DEMO_ROOT/work/ml-pipeline" -g "Work" 2>/dev/null
-    kata add "$DEMO_ROOT/work/auth-service" -g "Work" 2>/dev/null
-    kata add "$DEMO_ROOT/work/mobile-app" -g "Work" 2>/dev/null
-    kata add "$DEMO_ROOT/personal/dotfiles" -g "Personal" 2>/dev/null
-    kata add "$DEMO_ROOT/personal/blog" -g "Personal" 2>/dev/null
-    kata add "$DEMO_ROOT/oss/kata-oss" -g "Open Source" 2>/dev/null
-    echo -e "  ${GREEN}✓${NC} Registered 8 projects in Kata"
-
-    # Set colors via registry.json directly
+    # Write a clean registry with ONLY demo projects (no real ones)
     python3 -c "
 import json
-reg = json.load(open('$REGISTRY'))
-colors = {
-    'api-gateway': ('cyan', 1),
-    'dashboard-ui': ('purple', 2),
-    'ml-pipeline': ('orange', 3),
-    'auth-service': ('green', None),
-    'mobile-app': ('rose', None),
-    'dotfiles': ('teal', 9),
-    'blog': ('amber', None),
-    'kata-oss': ('blue', 4),
-}
-for p in reg['projects']:
-    if p['name'] in colors:
-        color, shortcut = colors[p['name']]
-        p['color'] = color
-        p['shortcut'] = shortcut
-json.dump(reg, open('$REGISTRY', 'w'), indent=2)
+from datetime import datetime, timedelta
+
+now = datetime.now()
+projects = [
+    {'name': 'api-gateway', 'path': '$DEMO_ROOT/work/api-gateway', 'group': 'Work',
+     'config': 'api-gateway.yaml', 'created_at': '2025-06-15T10:00:00',
+     'last_opened': (now - timedelta(minutes=12)).isoformat(), 'times_opened': 128,
+     'shortcut': 1, 'color': 'cyan'},
+    {'name': 'dashboard-ui', 'path': '$DEMO_ROOT/work/dashboard-ui', 'group': 'Work',
+     'config': 'dashboard-ui.yaml', 'created_at': '2025-08-03T10:00:00',
+     'last_opened': (now - timedelta(hours=2)).isoformat(), 'times_opened': 87,
+     'shortcut': 2, 'color': 'purple'},
+    {'name': 'ml-pipeline', 'path': '$DEMO_ROOT/work/ml-pipeline', 'group': 'Work',
+     'config': 'ml-pipeline.yaml', 'created_at': '2025-09-20T10:00:00',
+     'last_opened': (now - timedelta(hours=5)).isoformat(), 'times_opened': 45,
+     'shortcut': 3, 'color': 'orange'},
+    {'name': 'auth-service', 'path': '$DEMO_ROOT/work/auth-service', 'group': 'Work',
+     'config': 'auth-service.yaml', 'created_at': '2025-11-01T10:00:00',
+     'last_opened': (now - timedelta(days=1)).isoformat(), 'times_opened': 62,
+     'shortcut': None, 'color': 'green'},
+    {'name': 'mobile-app', 'path': '$DEMO_ROOT/work/mobile-app', 'group': 'Work',
+     'config': 'mobile-app.yaml', 'created_at': '2026-01-10T10:00:00',
+     'last_opened': (now - timedelta(days=2)).isoformat(), 'times_opened': 33,
+     'shortcut': None, 'color': 'rose'},
+    {'name': 'dotfiles', 'path': '$DEMO_ROOT/personal/dotfiles', 'group': 'Personal',
+     'config': 'dotfiles.yaml', 'created_at': '2024-03-01T10:00:00',
+     'last_opened': (now - timedelta(days=3)).isoformat(), 'times_opened': 210,
+     'shortcut': 9, 'color': 'teal'},
+    {'name': 'blog', 'path': '$DEMO_ROOT/personal/blog', 'group': 'Personal',
+     'config': 'blog.yaml', 'created_at': '2025-05-20T10:00:00',
+     'last_opened': (now - timedelta(days=7)).isoformat(), 'times_opened': 18,
+     'shortcut': None, 'color': 'amber'},
+    {'name': 'kata-oss', 'path': '$DEMO_ROOT/oss/kata-oss', 'group': 'Open Source',
+     'config': 'kata-oss.yaml', 'created_at': '2025-02-01T10:00:00',
+     'last_opened': (now - timedelta(minutes=30)).isoformat(), 'times_opened': 340,
+     'shortcut': 4, 'color': 'blue'},
+]
+registry = {'version': '1.0', 'projects': projects}
+with open('$REGISTRY', 'w') as f:
+    json.dump(registry, f, indent=2)
 "
-    echo -e "  ${GREEN}✓${NC} Set project colors and shortcuts"
+    echo -e "  ${GREEN}✓${NC} Wrote clean demo registry (no personal projects)"
 
     # Create some tmux sessions (so switcher shows active/detached)
     tmux new-session -d -s api-gateway -c "$DEMO_ROOT/work/api-gateway" 2>/dev/null || true
