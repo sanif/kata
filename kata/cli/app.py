@@ -1269,28 +1269,6 @@ def notify_hook(
         handle_claude(event_type, stdin_data)
 
 
-@app.command("notify-claude-stop", hidden=True, deprecated=True)
-def notify_claude_stop() -> None:
-    """Deprecated: use notify-hook stop instead."""
-    import sys
-
-    from kata.services.notifications.hooks.claude_code import handle_hook_event
-
-    stdin_data = sys.stdin.read()
-    handle_hook_event("stop", stdin_data)
-
-
-@app.command("notify-tmux-event", hidden=True)
-def notify_tmux_event(
-    event_type: str = typer.Argument(..., help="detached or attached"),
-    session: str = typer.Option(..., "--session", "-s", help="Session name"),
-) -> None:
-    """Handle tmux hook events."""
-    from kata.services.notifications.hooks.tmux import handle_tmux_event
-
-    handle_tmux_event(event_type, session)
-
-
 @app.command("setup")
 def setup() -> None:
     """Interactive setup for Kata integrations (hooks, keybindings)."""
