@@ -32,14 +32,15 @@ from kata.utils.zoxide import ZoxideEntry
 
 logger = logging.getLogger(__name__)
 
-KATA_ART = """\
-█▄▀  ▄▀▄  ▀█▀  ▄▀▄
-█ █  █▀█   █   █▀█
-▀ ▀  ▀ ▀   ▀   ▀ ▀"""
+KATA_BANNER_LINES = [
+    "[#22d3ee]╺┃╸[/]  [#38bdf8]╱ ╲[/]   [#818cf8]━┳━[/]  [#a78bfa]╱ ╲[/]",
+    "[#22d3ee]┣┛[/]   [#38bdf8]╱━━╲[/]   [#818cf8] ┃[/]   [#a78bfa]╱━━╲[/]",
+    "[#22d3ee]╹ ╲[/]  [#38bdf8]╵  ╵[/]   [#818cf8] ╹[/]   [#a78bfa]╵  ╵[/]",
+]
 
 
 class KataBanner(Widget):
-    """Custom ASCII art header banner."""
+    """Custom ASCII art header banner with circuit-node aesthetic."""
 
     DEFAULT_CSS = """
     KataBanner {
@@ -56,8 +57,6 @@ class KataBanner(Widget):
         margin-top: 1;
         content-align: center middle;
         text-align: center;
-        color: $primary;
-        text-style: bold;
     }
 
     KataBanner #banner-version {
@@ -75,7 +74,7 @@ class KataBanner(Widget):
         self._badge_count = 0
 
     def compose(self) -> ComposeResult:
-        yield Static(KATA_ART, id="banner-art")
+        yield Static("\n".join(KATA_BANNER_LINES), id="banner-art", markup=True)
         yield Static(f"v{self._version}", id="banner-version")
 
     def update_badge(self, count: int) -> None:
