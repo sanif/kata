@@ -495,25 +495,54 @@ class ContextMenuScreen(ModalScreen[str | None]):
         try:
             registry = get_registry()
 
+            session_name = sanitize_session_name(self.project.name)
+
             if color == "clear":
                 self.project.color = None
                 registry.update(self.project)
-                from kata.services.tmux_style import clear_project_color
-
-                clear_project_color(sanitize_session_name(self.project.name))
                 self.app.notify("Color cleared", title="Success")
+                # Apply tmux styling in background (may fail inside TUI)
+                import threading
+
+                threading.Thread(
+                    target=self._apply_tmux_clear, args=(session_name,), daemon=True
+                ).start()
             else:
                 self.project.color = color
                 registry.update(self.project)
-                from kata.services.tmux_style import apply_project_color
-
-                apply_project_color(sanitize_session_name(self.project.name), color)
                 self.app.notify(f"Color set to: {color}", title="Success")
+                import threading
+
+                threading.Thread(
+                    target=self._apply_tmux_color,
+                    args=(session_name, color),
+                    daemon=True,
+                ).start()
 
             self.dismiss("color_changed")
         except Exception as e:
             self.app.notify(f"Failed to set color: {e}", severity="error")
             self.dismiss(None)
+
+    @staticmethod
+    def _apply_tmux_color(session_name: str, color: str) -> None:
+        """Apply tmux color in a background thread."""
+        try:
+            from kata.services.tmux_style import apply_project_color
+
+            apply_project_color(session_name, color)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _apply_tmux_clear(session_name: str) -> None:
+        """Clear tmux color in a background thread."""
+        try:
+            from kata.services.tmux_style import clear_project_color
+
+            clear_project_color(session_name)
+        except Exception:
+            pass
 
     def _on_shortcut_selected(self, shortcut: int | None) -> None:
         """Handle shortcut selection."""
