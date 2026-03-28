@@ -531,13 +531,18 @@ class ContextMenuScreen(ModalScreen[str | None]):
             import sys
 
             python = sys.executable
-            cmd = (
-                f'{python} -c "'
-                f"from kata.services.tmux_style import apply_project_color; "
-                f"apply_project_color('{session_name}', '{color}')\""
+            script = (
+                "import sys; "
+                "from kata.services.tmux_style import apply_project_color; "
+                "apply_project_color(sys.argv[1], sys.argv[2])"
             )
             subprocess.run(
-                ["tmux", "run-shell", "-b", cmd],
+                [
+                    "tmux",
+                    "run-shell",
+                    "-b",
+                    f"{python} -c '{script}' {session_name} {color}",
+                ],
                 capture_output=True,
                 timeout=5,
             )
@@ -551,13 +556,18 @@ class ContextMenuScreen(ModalScreen[str | None]):
             import sys
 
             python = sys.executable
-            cmd = (
-                f'{python} -c "'
-                f"from kata.services.tmux_style import clear_project_color; "
-                f"clear_project_color('{session_name}')\""
+            script = (
+                "import sys; "
+                "from kata.services.tmux_style import clear_project_color; "
+                "clear_project_color(sys.argv[1])"
             )
             subprocess.run(
-                ["tmux", "run-shell", "-b", cmd],
+                [
+                    "tmux",
+                    "run-shell",
+                    "-b",
+                    f"{python} -c '{script}' {session_name}",
+                ],
                 capture_output=True,
                 timeout=5,
             )
