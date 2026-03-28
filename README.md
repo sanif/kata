@@ -24,9 +24,23 @@
 
 Press `Ctrl+Space` from any tmux session to instantly switch projects. No navigating directories, no re-opening editors, no remembering session names. Your projects are always one keystroke away.
 
+<p align="center">
+  <img src="screenshots/switcher.svg" alt="Project Switcher Popup" width="400">
+</p>
+
 ### AI Notifications Across Projects
 
 Running Claude Code in project A while working in project B? Kata hooks into **Claude Code**, **Gemini CLI**, and **Codex** to notify you the moment a task completes, a question is asked, or an error occurs — with macOS desktop notifications, an in-terminal notification center (`Ctrl+N`), and **6 sound packs** (default, gentle, arcade, arabic, zen, funk) with per-event audio cues. Smart suppression prevents notification spam — deduplication, cooldowns, and per-project toggles.
+
+<p align="center">
+  <img src="screenshots/claude_notification1.png" alt="macOS Notification — Question" height="50">
+  &nbsp;&nbsp;
+  <img src="screenshots/claude_notification2.png" alt="macOS Notification — Task Complete" height="50">
+</p>
+
+<p align="center">
+  <img src="screenshots/notify_popup.svg" alt="Notification Center Popup" width="600">
+</p>
 
 ### Workspaces That Never Die
 
@@ -63,7 +77,7 @@ Press `Enter` on any project to launch it. Press `Ctrl+Space` to switch between 
 | **Switch** | `Ctrl+Space` switcher | Popup project switcher from any tmux session |
 | **Notify** | AI tool hooks | Claude Code, Gemini CLI, Codex task completion alerts |
 | **Notify** | Notification center | `Ctrl+N` popup with per-project notification grouping |
-| **Notify** | Sound + macOS alerts | Configurable sound packs and native desktop notifications |
+| **Notify** | Sound + macOS alerts | 6 sound packs (default, gentle, arcade, arabic, zen, funk) + native desktop notifications |
 | **TUI** | Interactive dashboard | Browse, search, and launch projects with keyboard |
 | **TUI** | 10 themes | kata-dark, kata-ocean, kata-warm, kata-glass, and more |
 | **TUI** | Project colors | 12 color presets + hex codes — accents in tmux status bar and project tree |
@@ -92,6 +106,18 @@ Set via context menu (`m` → Set Color) in the dashboard.
 Assign number keys `1`-`9` to your most-used projects. Press the number directly in the dashboard to launch instantly — no scrolling, no searching.
 
 Set via context menu (`m` → Set Shortcut).
+
+### Search, Context Menu & Settings
+
+<p align="center">
+  <img src="screenshots/search.svg" alt="Search" width="400">
+  <img src="screenshots/context_menu.svg" alt="Context Menu" width="400">
+</p>
+
+<p align="center">
+  <img src="screenshots/settings.svg" alt="Settings" width="400">
+  <img src="screenshots/notifications.svg" alt="Notification Center" width="400">
+</p>
 
 ---
 
