@@ -1,7 +1,10 @@
 """Configuration paths and settings for Kata."""
 
+import logging
 import shutil
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Base configuration directory
 KATA_CONFIG_DIR = Path.home() / ".config" / "kata"
@@ -58,12 +61,14 @@ def migrate_project_config(project_name: str, project_path: str | Path) -> bool:
         shutil.move(str(legacy_path), str(new_path))
         return True
     except Exception:
+        logger.debug("Failed to move config for %s", project_name, exc_info=True)
         # If move fails, try copy
         try:
             shutil.copy2(str(legacy_path), str(new_path))
             legacy_path.unlink()  # Remove old file after successful copy
             return True
         except Exception:
+            logger.debug("Failed to copy config for %s", project_name, exc_info=True)
             return False
 
 
@@ -92,6 +97,6 @@ def migrate_all_configs() -> dict[str, bool]:
             if name and path:
                 results[name] = migrate_project_config(name, path)
     except Exception:
-        pass
+        logger.debug("Failed to migrate configs", exc_info=True)
 
     return results

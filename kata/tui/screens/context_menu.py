@@ -40,6 +40,32 @@ class MenuAction(Enum):
     SET_COLOR = auto()
 
 
+# Dispatch tables mapping actions/option IDs to method names
+_ACTION_METHODS: dict[MenuAction, str] = {
+    MenuAction.KILL: "action_kill_session",
+    MenuAction.DELETE: "action_delete_project",
+    MenuAction.RENAME: "action_rename_project",
+    MenuAction.MOVE_GROUP: "action_move_group",
+    MenuAction.OPEN_TERMINAL: "action_open_terminal",
+    MenuAction.SAVE_LAYOUT: "action_save_layout",
+    MenuAction.SET_SHORTCUT: "action_set_shortcut",
+    MenuAction.TOGGLE_NOTIFICATIONS: "action_toggle_notifications",
+    MenuAction.SET_COLOR: "action_set_color",
+}
+
+_OPTION_METHODS: dict[str, str] = {
+    "kill": "action_kill_session",
+    "delete": "action_delete_project",
+    "rename": "action_rename_project",
+    "move_group": "action_move_group",
+    "open_terminal": "action_open_terminal",
+    "save_layout": "action_save_layout",
+    "set_shortcut": "action_set_shortcut",
+    "toggle_notifications": "action_toggle_notifications",
+    "set_color": "action_set_color",
+}
+
+
 class ContextMenuScreen(ModalScreen[str | None]):
     """Modal context menu for project actions."""
 
@@ -163,18 +189,10 @@ class ContextMenuScreen(ModalScreen[str | None]):
         """Handle mount - execute preselected action if any."""
         if self.preselected_action:
             # Highlight the preselected option in the list
-            action_to_index = {
-                MenuAction.KILL: 0,
-                MenuAction.DELETE: 1,
-                MenuAction.RENAME: 2,
-                MenuAction.MOVE_GROUP: 3,
-                MenuAction.OPEN_TERMINAL: 4,
-                MenuAction.SAVE_LAYOUT: 5,
-                MenuAction.SET_SHORTCUT: 6,
-                MenuAction.TOGGLE_NOTIFICATIONS: 7,
-                MenuAction.SET_COLOR: 8,
-            }
-            index = action_to_index.get(self.preselected_action, 0)
+            actions = list(_ACTION_METHODS.keys())
+            index = (
+                actions.index(self.preselected_action) if self.preselected_action in actions else 0
+            )
             try:
                 menu_list = self.query_one("#menu-list", OptionList)
                 menu_list.highlighted = index
@@ -185,47 +203,16 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
     def _execute_preselected(self) -> None:
         """Execute the preselected action."""
-        if self.preselected_action == MenuAction.KILL:
-            self.action_kill_session()
-        elif self.preselected_action == MenuAction.DELETE:
-            self.action_delete_project()
-        elif self.preselected_action == MenuAction.RENAME:
-            self.action_rename_project()
-        elif self.preselected_action == MenuAction.MOVE_GROUP:
-            self.action_move_group()
-        elif self.preselected_action == MenuAction.OPEN_TERMINAL:
-            self.action_open_terminal()
-        elif self.preselected_action == MenuAction.SAVE_LAYOUT:
-            self.action_save_layout()
-        elif self.preselected_action == MenuAction.SET_SHORTCUT:
-            self.action_set_shortcut()
-        elif self.preselected_action == MenuAction.TOGGLE_NOTIFICATIONS:
-            self.action_toggle_notifications()
-        elif self.preselected_action == MenuAction.SET_COLOR:
-            self.action_set_color()
+        method_name = _ACTION_METHODS.get(self.preselected_action)
+        if method_name:
+            getattr(self, method_name)()
 
     @on(OptionList.OptionSelected)
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle option selection."""
-        option_id = event.option.id
-        if option_id == "kill":
-            self.action_kill_session()
-        elif option_id == "delete":
-            self.action_delete_project()
-        elif option_id == "rename":
-            self.action_rename_project()
-        elif option_id == "move_group":
-            self.action_move_group()
-        elif option_id == "open_terminal":
-            self.action_open_terminal()
-        elif option_id == "save_layout":
-            self.action_save_layout()
-        elif option_id == "set_shortcut":
-            self.action_set_shortcut()
-        elif option_id == "toggle_notifications":
-            self.action_toggle_notifications()
-        elif option_id == "set_color":
-            self.action_set_color()
+        method_name = _OPTION_METHODS.get(event.option.id)
+        if method_name:
+            getattr(self, method_name)()
 
     def action_cancel(self) -> None:
         """Cancel and close the menu."""
