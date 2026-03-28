@@ -125,13 +125,13 @@ class NotificationDaemon:
             return json.dumps({"status": "error", "message": str(e)})
 
     async def _broadcast(self, message: str) -> None:
-        """Send a message to all subscribers."""
+        """Send a message to all subscribers with per-subscriber timeout."""
         dead: list[asyncio.StreamWriter] = []
         for writer in self._subscribers:
             try:
                 writer.write((message + "\n").encode())
-                await writer.drain()
-            except (ConnectionResetError, BrokenPipeError):
+                await asyncio.wait_for(writer.drain(), timeout=2.0)
+            except (ConnectionResetError, BrokenPipeError, asyncio.TimeoutError):
                 dead.append(writer)
         for w in dead:
             self._subscribers.remove(w)

@@ -133,3 +133,29 @@ class TestNotificationDaemon:
         response = await daemon.handle_message("not json{{{")
         parsed = json.loads(response)
         assert parsed["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_handles_slow_subscriber(self, daemon):
+        """Test that broadcast doesn't block on slow subscribers."""
+        import asyncio
+
+        class SlowWriter:
+            def write(self, data):
+                pass
+
+            async def drain(self):
+                await asyncio.sleep(10)
+
+        slow_writer = SlowWriter()
+        daemon._subscribers.append(slow_writer)
+
+        try:
+            await asyncio.wait_for(
+                daemon._broadcast("test message"),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            pytest.fail("Broadcast blocked on slow subscriber")
+
+        # Slow subscriber should have been removed
+        assert slow_writer not in daemon._subscribers
