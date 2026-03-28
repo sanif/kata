@@ -77,7 +77,7 @@ pip install kata-workspace
 
 ```bash
 # Add to ~/.tmux.conf
-echo 'bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"' >> ~/.tmux.conf
+echo 'bind-key -n C-Space display-popup -E -B -w 70 -h 3 "kata switch-strip"' >> ~/.tmux.conf
 echo 'bind-key -n C-n display-popup -E -w 80% -h 60% "kata notify-popup"' >> ~/.tmux.conf
 
 # Reload tmux config
@@ -156,7 +156,7 @@ Or manually add to `~/.tmux.conf`:
 
 ```bash
 # Kata workspace orchestrator
-bind-key -n C-Space display-popup -E -w 80% -h 70% "kata switch"
+bind-key -n C-Space display-popup -E -B -w 70 -h 3 "kata switch-strip"
 ```
 
 Then reload: `tmux source ~/.tmux.conf`
