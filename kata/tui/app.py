@@ -1,5 +1,7 @@
 """TUI application for Kata dashboard."""
 
+import logging
+
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -27,6 +29,8 @@ from kata.tui.widgets.preview import PreviewPane
 from kata.tui.widgets.recents import RecentsPanel
 from kata.tui.widgets.tree import ProjectTree
 from kata.utils.zoxide import ZoxideEntry
+
+logger = logging.getLogger(__name__)
 
 KATA_ART = """\
 █▄▀  ▄▀▄  ▀█▀  ▄▀▄
@@ -662,17 +666,17 @@ def run_dashboard() -> None:
     if project:
         try:
             launch_or_attach(project)
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception:
+            logger.error("Failed to launch project %s", project.name, exc_info=True)
     elif zoxide_entry:
         try:
             launch_or_attach_adhoc(zoxide_entry.path)
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception:
+            logger.error("Failed to launch adhoc session for %s", zoxide_entry.path, exc_info=True)
     elif session_to_switch:
         try:
             from kata.services.sessions import attach_session
 
             attach_session(session_to_switch)
-        except Exception as e:
-            print(f"Error switching to session: {e}")
+        except Exception:
+            logger.error("Failed to switch to session %s", session_to_switch, exc_info=True)

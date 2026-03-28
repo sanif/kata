@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -13,6 +14,8 @@ from kata.utils.paths import sanitize_session_name
 
 if TYPE_CHECKING:
     import libtmux
+
+logger = logging.getLogger(__name__)
 
 
 class SessionError(Exception):
@@ -96,6 +99,7 @@ def get_session_status(session_name: str) -> SessionStatus:
             return SessionStatus.ACTIVE
         return SessionStatus.DETACHED
     except Exception:
+        logger.debug("Failed to get session status for %s", session_name, exc_info=True)
         return SessionStatus.IDLE
 
 
@@ -665,6 +669,7 @@ def get_session_layout(session_name: str) -> dict | None:
         }
 
     except (subprocess.TimeoutExpired, Exception):
+        logger.debug("Failed to capture session layout for %s", session_name, exc_info=True)
         return None
 
 
