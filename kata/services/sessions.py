@@ -293,7 +293,7 @@ def launch_or_attach(project: Project) -> None:
 
     session_name = sanitize_session_name(project.name)
     if session_exists(session_name):
-        apply_project_color(session_name, getattr(project, "color", None))
+        apply_project_color(session_name, project.color)
         attach_session(session_name)
     else:
         launch_session(project)
@@ -308,7 +308,7 @@ def launch_or_attach(project: Project) -> None:
         if not session_ready:
             raise SessionError(f"Session '{project.name}' failed to start within timeout")
 
-        apply_project_color(session_name, getattr(project, "color", None))
+        apply_project_color(session_name, project.color)
         attach_session(session_name)
 
 
