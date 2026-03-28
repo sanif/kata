@@ -1,12 +1,20 @@
-# Kata
+<p align="center">
+  <img src="assets/logo.svg" alt="Kata" width="600">
+</p>
 
-**Terminal-centric workspace orchestrator for tmux**
+<p align="center">
+  <strong>Terminal-centric workspace orchestrator for tmux</strong>
+</p>
 
-Kata is a powerful CLI and TUI tool that transforms how you manage development workspaces. It combines the speed of tmux with intelligent project organization, giving you instant access to any project with a single keystroke.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10+-green.svg)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
+<p align="center">
+  One keystroke to switch projects. Persistent sessions. Smart templates. Beautiful TUI.
+</p>
 
 <p align="center">
   <img src="screenshots/dashboard.svg" alt="Kata Dashboard" width="800">
@@ -400,6 +408,30 @@ kata migrate
 ```
 
 This moves config files from `~/.config/kata/configs/` to each project's folder as `.kata.yaml`. Migration also happens automatically when launching a session.
+
+#### `kata setup`
+Interactive setup for hooks and keybindings.
+
+```bash
+kata setup
+```
+
+Toggleable checklist to configure Claude Code, Gemini, and Codex notification hooks, tmux keybindings (Ctrl+Space, Ctrl+N, Ctrl+Q), and terminal-notifier.
+
+#### `kata uninstall`
+Interactive uninstaller — cleanly removes everything kata installed.
+
+```bash
+kata uninstall
+```
+
+Toggleable checklist to selectively remove:
+- Claude Code / Gemini / Codex notification hooks
+- Tmux keybindings from `~/.tmux.conf` + live unbind
+- Notification daemon
+- Config directory (`~/.config/kata`)
+- Per-project `.kata.yaml` files
+- The kata package itself
 
 ---
 
