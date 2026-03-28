@@ -4,6 +4,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
+
 
 @dataclass
 class GitStatus:
@@ -40,7 +42,7 @@ def is_git_repository(path: Path | str) -> bool:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -64,7 +66,7 @@ def get_branch_name(path: Path | str) -> str | None:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -75,7 +77,7 @@ def get_branch_name(path: Path | str) -> str | None:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             return f"tag:{result.stdout.strip()}"
@@ -86,7 +88,7 @@ def get_branch_name(path: Path | str) -> str | None:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             return f"({result.stdout.strip()})"
@@ -113,7 +115,7 @@ def is_dirty(path: Path | str) -> bool:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         return result.returncode == 0 and bool(result.stdout.strip())
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -144,7 +146,7 @@ def get_git_status(path: Path | str) -> GitStatus:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
@@ -175,7 +177,7 @@ def get_git_status(path: Path | str) -> GitStatus:
             cwd=path,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             parts = result.stdout.strip().split()

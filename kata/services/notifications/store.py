@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from kata.core.config import NOTIFICATIONS_DB, ensure_config_dirs
+from kata.core.constants import DB_BUSY_TIMEOUT_MS, DB_CONNECT_TIMEOUT
 from kata.services.notifications.models import (
     Notification,
     NotificationSource,
@@ -48,9 +49,11 @@ class NotificationStore:
         self._db_path = db_path or NOTIFICATIONS_DB
         if db_path is None:
             ensure_config_dirs()
-        self._conn = sqlite3.connect(str(self._db_path), timeout=15, isolation_level=None)
+        self._conn = sqlite3.connect(
+            str(self._db_path), timeout=DB_CONNECT_TIMEOUT, isolation_level=None
+        )
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA busy_timeout=10000")
+        self._conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
         try:
             self._conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:

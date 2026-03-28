@@ -10,6 +10,7 @@ import logging
 import shutil
 import subprocess
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.settings import get_settings
 from kata.services.notifications.dispatch.audio import play_sound, resolve_sound_path
 from kata.services.notifications.dispatch.summary import generate_summary
@@ -58,7 +59,7 @@ def get_git_branch(cwd: str) -> str:
             ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             return result.stdout.strip()

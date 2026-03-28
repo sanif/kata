@@ -8,6 +8,7 @@ the background color with the project's color.
 import re
 import subprocess
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.utils.colors import hex_to_256, resolve_color
 
 
@@ -18,7 +19,7 @@ def _run_tmux(*args: str) -> str | None:
             ["tmux", *args],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode == 0:
             return result.stdout.strip()

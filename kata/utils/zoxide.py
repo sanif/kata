@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
+
 
 @dataclass
 class ZoxideEntry:
@@ -54,7 +56,7 @@ def query_zoxide(
             ["zoxide", "query", "-l", "-s"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
 
         if result.returncode != 0:

@@ -22,6 +22,7 @@ import tty
 from rich.console import Console
 from rich.text import Text
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import SessionStatus
 from kata.services.registry import get_registry
 from kata.services.sessions import (
@@ -38,7 +39,7 @@ def _tmux_session_exists(session_name: str) -> bool:
         result = subprocess.run(
             ["tmux", "has-session", "-t", session_name],
             capture_output=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):

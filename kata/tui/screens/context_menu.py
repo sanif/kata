@@ -12,6 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import Project
 from kata.core.settings import get_settings, update_settings
 from kata.services.registry import get_registry
@@ -544,7 +545,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                     f"{python} -c '{script}' {session_name} {color}",
                 ],
                 capture_output=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
             )
         except Exception:
             pass
@@ -569,7 +570,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                     f"{python} -c '{script}' {session_name}",
                 ],
                 capture_output=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
             )
         except Exception:
             pass

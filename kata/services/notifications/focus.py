@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 
+from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def focus_terminal() -> bool:
         subprocess.run(
             ["osascript", "-e", script],
             capture_output=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         return True
     except Exception:
@@ -84,7 +85,7 @@ def switch_to_session(session_name: str) -> bool:
         result = subprocess.run(
             ["tmux", "switch-client", "-t", session_name],
             capture_output=True,
-            timeout=5,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode != 0:
             return False
