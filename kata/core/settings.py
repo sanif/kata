@@ -2,7 +2,7 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from kata.core.config import KATA_CONFIG_DIR
@@ -117,39 +117,14 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
-        """Deserialize settings from dictionary."""
-        return cls(
-            loop_enabled=data.get("loop_enabled", False),
-            default_group=data.get("default_group", "Uncategorized"),
-            refresh_interval=data.get("refresh_interval", 5),
-            theme=data.get("theme", "default"),
-            notifications_enabled=data.get("notifications_enabled", True),
-            notifications_os_enabled=data.get("notifications_os_enabled", True),
-            notifications_sound=data.get("notifications_sound", "Glass"),
-            notifications_retention_days=data.get("notifications_retention_days", 7),
-            notifications_max_count=data.get("notifications_max_count", 500),
-            notifications_claude_code_hooks=data.get("notifications_claude_code_hooks", True),
-            notifications_tmux_hooks=data.get("notifications_tmux_hooks", True),
-            notifications_suppression_seconds=data.get("notifications_suppression_seconds", 5),
-            notifications_terminal_app=data.get("notifications_terminal_app", "auto"),
-            notifications_sound_enabled=data.get("notifications_sound_enabled", True),
-            notifications_sound_pack=data.get("notifications_sound_pack", "default"),
-            notifications_volume=data.get("notifications_volume", 1.0),
-            notifications_sounds=data.get("notifications_sounds", {}),
-            notifications_suppress_question_after_task_seconds=data.get(
-                "notifications_suppress_question_after_task_seconds", 12
-            ),
-            notifications_suppress_question_after_any_seconds=data.get(
-                "notifications_suppress_question_after_any_seconds", 12
-            ),
-            notifications_suppress_duplicate_seconds=data.get(
-                "notifications_suppress_duplicate_seconds", 5
-            ),
-            notifications_subagent_stop=data.get("notifications_subagent_stop", False),
-            notifications_disabled_projects=data.get("notifications_disabled_projects", []),
-            color_accent_position=data.get("color_accent_position", "top"),
-            color_accent_enabled=data.get("color_accent_enabled", True),
-        )
+        """Deserialize settings from dictionary.
+
+        Only passes keys that match dataclass fields, using each field's
+        default for any missing key. This avoids duplicating defaults.
+        """
+        valid_fields = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
 
 
 def _migrate_from_legacy() -> Settings | None:
