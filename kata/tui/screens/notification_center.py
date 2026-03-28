@@ -16,17 +16,7 @@ from kata.services.notifications.models import (
     NotificationStatus,
     NotificationType,
 )
-
-# Compact icons per notification type
-TYPE_ICONS: dict[NotificationType, str] = {
-    NotificationType.TASK_COMPLETE: "󰄬",
-    NotificationType.QUESTION: "?",
-    NotificationType.PLAN_READY: "󰈙",
-    NotificationType.REVIEW_DONE: "󰍉",
-    NotificationType.ERROR: "✗",
-    NotificationType.SESSION_LIMIT: "󰥔",
-    NotificationType.ROUTINE_COMPLETE: "◉",
-}
+from kata.utils.notifications import TYPE_ICONS, escape_rich, load_grouped, time_ago
 
 # Short type labels for expanded view
 TYPE_LABELS: dict[NotificationType, str] = {
@@ -45,34 +35,6 @@ _COL_COUNT = 8
 _COL_TIME = 6
 _COL_MSG = 36
 _MAX_BODY_LINES = 12
-
-
-def _time_ago(ts: datetime) -> str:
-    """Format a timestamp as compact relative time."""
-    try:
-        delta = datetime.now() - ts
-        seconds = int(delta.total_seconds())
-        if seconds < 0:
-            return ""
-        if seconds < 60:
-            return "now"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h"
-        days = hours // 24
-        return f"{days}d"
-    except Exception:
-        return ""
-
-
-def _escape(text: str) -> str:
-    """Escape text for Rich markup."""
-    if not text or not isinstance(text, str):
-        return ""
-    return text.replace("[", r"\[")
 
 
 def _get_message(n: Notification) -> str:
@@ -97,20 +59,6 @@ def _get_body_lines(n: Notification) -> list[str]:
         return []
     remaining = [line.strip() for line in lines[1:] if line.strip()]
     return remaining[:_MAX_BODY_LINES]
-
-
-def _load_grouped() -> dict[str, list[Notification]]:
-    """Load notifications grouped by session using a fresh DB connection."""
-    try:
-        from kata.services.notifications.store import NotificationStore
-
-        store = NotificationStore()
-        try:
-            return store.list_grouped_by_session()
-        finally:
-            store.close()
-    except Exception:
-        return {}
 
 
 class NotificationCenterModal(ModalScreen[str | None]):
@@ -195,7 +143,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
     def _refresh_list(self) -> None:
         """Reload notifications and rebuild the tree."""
-        grouped = _load_grouped()
+        grouped = load_grouped()
 
         tree = self.query_one("#nc-tree", Tree)
         tree.clear()
@@ -267,7 +215,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
                         expand=False,
                     )
                     for line in body_lines:
-                        escaped_line = _escape(line)
+                        escaped_line = escape_rich(line)
                         if len(escaped_line) > 60:
                             escaped_line = escaped_line[:59] + "…"
                         notif_node.add_leaf(
@@ -287,11 +235,11 @@ class NotificationCenterModal(ModalScreen[str | None]):
 
     def _build_project_label(self, name: str, unread: int, most_recent: datetime) -> str:
         """Build label for a project row."""
-        escaped_name = _escape(name)
+        escaped_name = escape_rich(name)
         if len(escaped_name) > _COL_NAME:
             escaped_name = escaped_name[: _COL_NAME - 1] + "…"
 
-        time_str = _time_ago(most_recent)
+        time_str = time_ago(most_recent)
 
         if unread > 0:
             count_str = f"{unread} new"
@@ -313,13 +261,13 @@ class NotificationCenterModal(ModalScreen[str | None]):
         """Build label for a notification child row."""
         icon = TYPE_ICONS.get(n.type, "•")
         type_label = TYPE_LABELS.get(n.type, "")
-        message = _escape(_get_message(n)) or "Notification"
+        message = escape_rich(_get_message(n)) or "Notification"
 
         # Shorter message to make room for type label
         max_msg = _COL_MSG - len(type_label) - 3 if type_label else _COL_MSG
         if len(message) > max_msg:
             message = message[: max_msg - 1] + "…"
-        time_str = _time_ago(n.timestamp)
+        time_str = time_ago(n.timestamp)
 
         is_unread = n.status == NotificationStatus.UNREAD
         type_tag = f" [dim italic]{type_label}[/dim italic]" if type_label else ""

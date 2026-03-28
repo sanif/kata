@@ -24,40 +24,10 @@ from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.services.notifications.models import (
     Notification,
     NotificationStatus,
-    NotificationType,
 )
+from kata.utils.notifications import TYPE_ICONS, escape_rich, load_grouped, time_ago
 
 # ── Data ────────────────────────────────────────────────────────────────
-
-TYPE_ICONS: dict[NotificationType, str] = {
-    NotificationType.TASK_COMPLETE: "󰄬",
-    NotificationType.QUESTION: "?",
-    NotificationType.PLAN_READY: "󰈙",
-    NotificationType.REVIEW_DONE: "󰍉",
-    NotificationType.ERROR: "✗",
-    NotificationType.SESSION_LIMIT: "󰥔",
-    NotificationType.ROUTINE_COMPLETE: "◉",
-}
-
-
-def _time_ago(ts: datetime) -> str:
-    try:
-        delta = datetime.now() - ts
-        seconds = int(delta.total_seconds())
-        if seconds < 0:
-            return ""
-        if seconds < 60:
-            return "now"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h"
-        days = hours // 24
-        return f"{days}d"
-    except Exception:
-        return ""
 
 
 def _get_message(n: Notification) -> str:
@@ -77,25 +47,6 @@ def _get_full_body(n: Notification) -> str:
         return body.strip()
     title = getattr(n, "title", "") or ""
     return title if isinstance(title, str) else str(title)
-
-
-def _escape_rich(text: str) -> str:
-    if not text:
-        return ""
-    return text.replace("[", r"\[")
-
-
-def _load_grouped() -> dict[str, list[Notification]]:
-    try:
-        from kata.services.notifications.store import NotificationStore
-
-        store = NotificationStore()
-        try:
-            return store.list_grouped_by_session()
-        finally:
-            store.close()
-    except Exception:
-        return {}
 
 
 def _get_store():
@@ -123,7 +74,7 @@ def _build_projects(grouped: dict[str, list[Notification]]) -> list[_Project]:
         unread = sum(1 for n in notifications if n.status == NotificationStatus.UNREAD)
         total = len(notifications)
         ts = notifications[0].timestamp if notifications else datetime.now()
-        projects.append(_Project(session_name, unread, total, _time_ago(ts)))
+        projects.append(_Project(session_name, unread, total, time_ago(ts)))
     projects.sort(key=lambda p: (-p.unread, -p.total))
     return projects[:_MAX_PROJECTS]
 
@@ -279,8 +230,8 @@ def render_panel(
         if row_i < len(notifs):
             n = notifs[row_i]
             icon = TYPE_ICONS.get(n.type, "•")
-            msg = _escape_rich(_get_message(n)) or "Notification"
-            t = _time_ago(n.timestamp)
+            msg = escape_rich(_get_message(n)) or "Notification"
+            t = time_ago(n.timestamp)
             is_unread = n.status == NotificationStatus.UNREAD
 
             if is_notif_sel:
@@ -325,7 +276,7 @@ def render_panel(
     detail_lines_used = 0
     if focus == "right" and notifs and 0 <= notif_cursor < len(notifs):
         sel_notif = notifs[notif_cursor]
-        full_body = _escape_rich(_get_full_body(sel_notif))
+        full_body = escape_rich(_get_full_body(sel_notif))
 
         # Wrap body into lines that fit
         body_w = w - 6  # "│  " + content + "  │"
@@ -466,7 +417,7 @@ def _read_key(fd: int) -> str:
 
 def open_notify_popup() -> None:
     """Calculate content size and spawn a fitted borderless tmux popup."""
-    grouped = _load_grouped()
+    grouped = load_grouped()
     projects = _build_projects(grouped)
 
     content_rows = max(len(projects), _NOTIF_ROWS, 3)
@@ -507,7 +458,7 @@ def open_notify_popup() -> None:
 
 
 def _reload_state():
-    grouped = _load_grouped()
+    grouped = load_grouped()
     projects = _build_projects(grouped)
     total_unread = 0
     for notifs in grouped.values():
