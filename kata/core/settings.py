@@ -69,6 +69,8 @@ class Settings:
 
     # Color accent line position in tmux ("top" or "bottom")
     color_accent_position: str = "top"
+    # Show colored accent line border in tmux when project has a color
+    color_accent_enabled: bool = True
 
     def __post_init__(self) -> None:
         """Validate and clamp values."""
@@ -146,6 +148,7 @@ class Settings:
             notifications_subagent_stop=data.get("notifications_subagent_stop", False),
             notifications_disabled_projects=data.get("notifications_disabled_projects", []),
             color_accent_position=data.get("color_accent_position", "top"),
+            color_accent_enabled=data.get("color_accent_enabled", True),
         )
 
 
