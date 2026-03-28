@@ -53,7 +53,7 @@ def apply_project_color(session_name: str, color: str | None) -> None:
         f"#[fg={color_str}]" + "─" * 200 + "#[default]"
     )
 
-    _set_window_option(session_name, "pane-border-status", "top")
+    _set_window_option(session_name, "pane-border-status", "bottom")
     _set_window_option(session_name, "pane-border-format", border_format)
     _set_window_option(session_name, "pane-border-style", f"fg={color_str}")
     _set_window_option(session_name, "pane-active-border-style", f"fg={color_str}")
