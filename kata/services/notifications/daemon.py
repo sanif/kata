@@ -186,6 +186,9 @@ class NotificationDaemon:
             self._handle_client, path=str(NOTIFYD_SOCKET)
         )
 
+        # Restrict socket to owner only
+        os.chmod(str(NOTIFYD_SOCKET), 0o600)
+
         # Write PID file
         NOTIFYD_PID_FILE.write_text(str(os.getpid()))
 
