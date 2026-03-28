@@ -195,7 +195,7 @@ def render_panel(
     hint = Text()
     hint.append("  C-␣", "cyan")
     hint.append(" next", "dim")
-    hint.append("   ↵", "cyan")
+    hint.append("   ↵/␣", "cyan")
     hint.append(" go", "dim")
     hint.append("   esc", "cyan")
     hint.append(" quit", "dim")
