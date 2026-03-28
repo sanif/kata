@@ -64,9 +64,7 @@ version-file = "kata/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kata"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"kata/services/notifications/sounds" = "kata/services/notifications/sounds"
+artifacts = ["kata/services/notifications/sounds/**/*.mp3"]
 
 [tool.ruff]
 target-version = "py310"
