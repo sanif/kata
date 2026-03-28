@@ -10,29 +10,36 @@ from kata.services.notifications.models import NotificationType
 class TestHandleHookEvent:
     """Tests for the main dispatch pipeline."""
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
     @patch("kata.services.notifications.hooks.claude_code.get_settings")
-    def test_disabled_notifications_returns_early(self, mock_settings):
+    def test_disabled_notifications_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=False)
-        # Should not raise — just returns
-        handle_hook_event("stop", "{}")
+        handle_hook_event("stop", '{"session_id": "test"}')
+        mock_notify.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
     @patch("kata.services.notifications.hooks.claude_code.get_settings")
-    def test_invalid_json_returns_early(self, mock_settings):
+    def test_invalid_json_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
-        handle_hook_event("stop", "not json")
+        handle_hook_event("stop", "not json{{{")
+        mock_notify.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
     @patch("kata.services.notifications.hooks.claude_code.get_settings")
-    def test_empty_stdin_returns_early(self, mock_settings):
+    def test_empty_stdin_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
-        handle_hook_event("stop", "  ")
+        handle_hook_event("stop", "")
+        mock_notify.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
     @patch("kata.services.notifications.hooks.claude_code.get_settings")
-    def test_subagent_stop_disabled(self, mock_settings):
+    def test_subagent_stop_disabled(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(
             notifications_enabled=True,
             notifications_subagent_stop=False,
         )
         handle_hook_event("subagent-stop", json.dumps({"session_id": "s1"}))
+        mock_notify.assert_not_called()
 
     @patch("kata.services.notifications.hooks.claude_code.update_session_state")
     @patch("kata.services.notifications.hooks.claude_code.notify")
@@ -232,9 +239,10 @@ class TestPreToolUseClassification:
         call_kwargs = mock_notify.call_args.kwargs
         assert call_kwargs["type"] == NotificationType.PLAN_READY
 
+    @patch("kata.services.notifications.hooks.claude_code.notify")
     @patch("kata.services.notifications.hooks.claude_code.is_duplicate_early")
     @patch("kata.services.notifications.hooks.claude_code.get_settings")
-    def test_irrelevant_tool_skipped(self, mock_settings, mock_dedup_early):
+    def test_irrelevant_tool_skipped(self, mock_settings, mock_dedup_early, mock_notify):
         mock_settings.return_value = MagicMock(
             notifications_enabled=True,
         )
@@ -247,6 +255,7 @@ class TestPreToolUseClassification:
             }
         )
         handle_hook_event("pre-tool-use", stdin)
+        mock_notify.assert_not_called()
 
     @patch("kata.services.notifications.hooks.claude_code.update_session_state")
     @patch("kata.services.notifications.hooks.claude_code.notify")

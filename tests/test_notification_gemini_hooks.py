@@ -10,16 +10,19 @@ from kata.services.notifications.models import NotificationType
 class TestHandleGeminiHookEvent:
     """Tests for the Gemini dispatch pipeline."""
 
+    @patch("kata.services.notifications.hooks.gemini.notify")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_disabled_notifications_returns_early(self, mock_settings):
+    def test_disabled_notifications_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=False)
-        # Should not raise — just returns
         handle_hook_event("after-agent", "{}")
+        mock_notify.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.gemini.notify")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_invalid_json_returns_early(self, mock_settings):
+    def test_invalid_json_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
         handle_hook_event("after-agent", "not json")
+        mock_notify.assert_not_called()
 
     @patch("kata.services.notifications.hooks.gemini.update_session_state")
     @patch("kata.services.notifications.hooks.gemini.notify")

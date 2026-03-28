@@ -10,15 +10,19 @@ from kata.services.notifications.models import NotificationType
 class TestHandleCodexHookEvent:
     """Tests for the Codex dispatch pipeline."""
 
+    @patch("kata.services.notifications.hooks.codex.notify")
     @patch("kata.services.notifications.hooks.codex.get_settings")
-    def test_disabled_notifications_returns_early(self, mock_settings):
+    def test_disabled_notifications_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=False)
         handle_hook_event("{}")
+        mock_notify.assert_not_called()
 
+    @patch("kata.services.notifications.hooks.codex.notify")
     @patch("kata.services.notifications.hooks.codex.get_settings")
-    def test_invalid_json_returns_early(self, mock_settings):
+    def test_invalid_json_returns_early(self, mock_settings, mock_notify):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
         handle_hook_event("not json")
+        mock_notify.assert_not_called()
 
     @patch("kata.services.notifications.hooks.codex.update_session_state")
     @patch("kata.services.notifications.hooks.codex.notify")
