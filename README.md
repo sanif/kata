@@ -66,18 +66,32 @@ Press `Enter` on any project to launch it. Press `Ctrl+Space` to switch between 
 | **Notify** | Sound + macOS alerts | Configurable sound packs and native desktop notifications |
 | **TUI** | Interactive dashboard | Browse, search, and launch projects with keyboard |
 | **TUI** | 10 themes | kata-dark, kata-ocean, kata-warm, kata-glass, and more |
-| **TUI** | Project colors | Per-project color accents in tmux status bar |
+| **TUI** | Project colors | 12 color presets + hex codes — accents in tmux status bar and project tree |
 | **Session** | Persistent sessions | Tmux sessions survive terminal closures |
 | **Session** | Return loop | Dashboard auto-relaunches after detach |
 | **Session** | Morning routine | `kata routine` launches all your daily projects at once |
 | **Session** | Layout capture | Save your current tmux pane arrangement to config |
 | **Project** | Auto-detection | Detects Python, Node.js, Go projects automatically |
 | **Project** | Smart templates | Pre-configured layouts with virtualenv, test runners |
-| **Project** | Quick shortcuts | Assign 1-9 keys for instant project launch |
+| **Project** | Quick shortcuts | Assign `1`-`9` keys for instant project launch from dashboard |
 | **Project** | Zoxide recents | Frecency-sorted recent directories with adhoc sessions |
 | **Project** | Git integration | Branch, dirty state, upstream status at a glance |
 | **Ops** | `kata setup` | Interactive setup for hooks, keybindings, tools |
 | **Ops** | `kata uninstall` | Clean removal of all hooks, configs, and the package |
+
+### Project Colors
+
+Assign colors to projects for instant visual identification. Colors appear as an accent line in the tmux status bar and next to the project name in the tree.
+
+**12 presets:** blue, red, green, orange, purple, teal, rose, amber, cyan, lime, coral, slate — or any `#hex` code.
+
+Set via context menu (`m` → Set Color) in the dashboard.
+
+### Quick Launch Shortcuts
+
+Assign number keys `1`-`9` to your most-used projects. Press the number directly in the dashboard to launch instantly — no scrolling, no searching.
+
+Set via context menu (`m` → Set Shortcut).
 
 ---
 
