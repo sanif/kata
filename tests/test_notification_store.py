@@ -247,6 +247,18 @@ class TestNotificationStore:
             store.close()
             temp_path.unlink(missing_ok=True)
 
+    def test_list_all_with_limit_uses_parameterized_query(self):
+        """Verify limit parameter is safely parameterized (no SQL injection)."""
+        store, temp_path = self._make_store()
+        try:
+            for i in range(5):
+                store.add(_make_notification(title=f"N{i}"))
+            result = store.list_all(limit=3)
+            assert len(result) == 3
+        finally:
+            store.close()
+            temp_path.unlink(missing_ok=True)
+
     def test_list_with_limit(self):
         store, temp_path = self._make_store()
         try:

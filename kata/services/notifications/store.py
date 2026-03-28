@@ -100,10 +100,15 @@ class NotificationStore:
 
     def list_all(self, limit: int = 0) -> list[Notification]:
         """List all notifications, ordered by timestamp descending."""
-        query = "SELECT * FROM notifications ORDER BY timestamp DESC"
         if limit > 0:
-            query += f" LIMIT {limit}"
-        rows = self._conn.execute(query).fetchall()
+            rows = self._conn.execute(
+                "SELECT * FROM notifications ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM notifications ORDER BY timestamp DESC"
+            ).fetchall()
         return [self._row_to_notification(r) for r in rows]
 
     def list_by_status(self, status: NotificationStatus) -> list[Notification]:
