@@ -26,7 +26,7 @@ Press `Ctrl+Space` from any tmux session to instantly switch projects. No naviga
 
 ### AI Notifications Across Projects
 
-Running Claude Code in project A while working in project B? Kata hooks into **Claude Code**, **Gemini CLI**, and **Codex** to notify you the moment a task completes, a question is asked, or an error occurs — with macOS notifications, sound alerts, and an in-terminal notification center (`Ctrl+N`).
+Running Claude Code in project A while working in project B? Kata hooks into **Claude Code**, **Gemini CLI**, and **Codex** to notify you the moment a task completes, a question is asked, or an error occurs — with macOS desktop notifications, an in-terminal notification center (`Ctrl+N`), and **6 sound packs** (default, gentle, arcade, arabic, zen, funk) with per-event audio cues. Smart suppression prevents notification spam — deduplication, cooldowns, and per-project toggles.
 
 ### Workspaces That Never Die
 
