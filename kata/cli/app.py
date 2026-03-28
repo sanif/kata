@@ -961,6 +961,21 @@ def switch_strip_cmd(
         open_switcher_popup(backward=backward)
 
 
+@app.command("_apply-color", hidden=True)
+def apply_color_cmd(
+    session_name: str = typer.Argument(...),
+    color_value: str | None = typer.Argument(None),
+    clear: bool = typer.Option(False, "--clear"),
+) -> None:
+    """Internal: apply or clear tmux color styling (called via tmux run-shell)."""
+    from kata.services.tmux_style import apply_project_color, clear_project_color
+
+    if clear:
+        clear_project_color(session_name)
+    elif color_value:
+        apply_project_color(session_name, color_value)
+
+
 @app.command()
 def color(
     name: str | None = typer.Argument(None, help="Project name"),

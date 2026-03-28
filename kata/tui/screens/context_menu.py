@@ -526,21 +526,41 @@ class ContextMenuScreen(ModalScreen[str | None]):
 
     @staticmethod
     def _apply_tmux_color(session_name: str, color: str) -> None:
-        """Apply tmux color in a background thread."""
+        """Apply tmux color via tmux run-shell to avoid Textual terminal conflicts."""
         try:
-            from kata.services.tmux_style import apply_project_color
+            import shutil
 
-            apply_project_color(session_name, color)
+            kata_path = shutil.which("kata") or "kata"
+            subprocess.run(
+                [
+                    "tmux",
+                    "run-shell",
+                    "-b",
+                    f"{kata_path} _apply-color {session_name} {color}",
+                ],
+                capture_output=True,
+                timeout=5,
+            )
         except Exception:
             pass
 
     @staticmethod
     def _apply_tmux_clear(session_name: str) -> None:
-        """Clear tmux color in a background thread."""
+        """Clear tmux color via tmux run-shell to avoid Textual terminal conflicts."""
         try:
-            from kata.services.tmux_style import clear_project_color
+            import shutil
 
-            clear_project_color(session_name)
+            kata_path = shutil.which("kata") or "kata"
+            subprocess.run(
+                [
+                    "tmux",
+                    "run-shell",
+                    "-b",
+                    f"{kata_path} _apply-color {session_name} --clear",
+                ],
+                capture_output=True,
+                timeout=5,
+            )
         except Exception:
             pass
 
