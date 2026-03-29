@@ -305,8 +305,16 @@ class ProjectTree(Widget):
         tree = self.query_one("#project-tree", Tree)
         existing_names = set(self._projects_by_name.keys())
 
-        if current_names == existing_names and tree.root.children:
-            # Fast path: same projects — update labels in-place (cursor preserved)
+        # Check if any project changed group (move to group)
+        groups_changed = False
+        for p in projects:
+            old = self._projects_by_name.get(p.name)
+            if old and old.group != p.group:
+                groups_changed = True
+                break
+
+        if current_names == existing_names and tree.root.children and not groups_changed:
+            # Fast path: same projects, same groups — update labels in-place (cursor preserved)
             for group_node in tree.root.children:
                 if not (group_node.data and group_node.data.get("type") == "group"):
                     continue
