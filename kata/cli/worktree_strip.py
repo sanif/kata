@@ -291,30 +291,189 @@ def _read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def _read_line(console: Console, prompt: str) -> str | None:
-    """Read a line of text input. Returns None on Esc/Ctrl+C."""
+def _render_create_panel(
+    project_name: str,
+    buf: str,
+    step: str,  # "name" or "context"
+    term_width: int,
+) -> list[Text]:
+    """Render the create-worktree panel with inline input."""
+    w = term_width
+    lines: list[Text] = []
+    avail = w - 4
+
+    # ── Top border ──
+    title = f" {_ICON_WORKTREE} new worktree "
+    side = (w - 2 - len(title)) // 2
+    top = Text()
+    top.append("╭", "dim")
+    top.append("─" * side, "dim")
+    top.append(title, "bold cyan")
+    top.append("─" * (w - 2 - side - len(title)), "dim")
+    top.append("╮", "dim")
+    lines.append(top)
+
+    lines.append(_content_row(Text(""), w))
+
+    # ── Project context ──
+    ctx = Text()
+    ctx.append("  from ", "dim")
+    ctx.append(project_name, "bold")
+    lines.append(_content_row(ctx, w))
+
+    lines.append(_content_row(Text(""), w))
+
+    if step == "name":
+        # ── Branch name input ──
+        label = Text()
+        label.append(f"  {_ICON_BRANCH} branch name", "dim")
+        lines.append(_content_row(label, w))
+
+        input_row = Text()
+        input_row.append("  > ", "cyan")
+        input_row.append(buf, "bold")
+        input_row.append("_", "dim")  # cursor
+        lines.append(_content_row(input_row, w))
+    else:
+        # ── Show chosen name ──
+        chosen = Text()
+        chosen.append(f"  {_ICON_BRANCH} ", "dim")
+        chosen.append(buf, "bold")
+        lines.append(_content_row(chosen, w))
+
+        lines.append(_content_row(Text(""), w))
+
+        # ── Context mode selection ──
+        mode_label = Text()
+        mode_label.append("  context mode", "dim")
+        lines.append(_content_row(mode_label, w))
+
+        lines.append(_content_row(Text(""), w))
+
+        opt_f = Text()
+        opt_f.append("  [", "dim")
+        opt_f.append("f", "cyan bold")
+        opt_f.append("]", "dim")
+        opt_f.append(" fork", "")
+        opt_f.append("      carry full Claude session", "dim")
+        lines.append(_content_row(opt_f, w))
+
+        opt_s = Text()
+        opt_s.append("  [", "dim")
+        opt_s.append("s", "cyan bold")
+        opt_s.append("]", "dim")
+        opt_s.append(" summary", "")
+        opt_s.append("   seed with session summary", "dim")
+        lines.append(_content_row(opt_s, w))
+
+        opt_c = Text()
+        opt_c.append("  [", "dim")
+        opt_c.append("c", "cyan bold")
+        opt_c.append("]", "dim")
+        opt_c.append(" clean", "")
+        opt_c.append("     start fresh", "dim")
+        lines.append(_content_row(opt_c, w))
+
+    lines.append(_content_row(Text(""), w))
+
+    # ── Separator ──
+    sep = Text()
+    sep.append("├", "dim")
+    sep.append("─" * (w - 2), "dim")
+    sep.append("┤", "dim")
+    lines.append(sep)
+
+    # ── Hint ──
+    hint = Text()
+    if step == "name":
+        hint.append("  ↵", "cyan")
+        hint.append(" confirm", "dim")
+        hint.append("   esc", "cyan")
+        hint.append(" cancel", "dim")
+    else:
+        hint.append("  f", "cyan")
+        hint.append("/", "dim")
+        hint.append("s", "cyan")
+        hint.append("/", "dim")
+        hint.append("c", "cyan")
+        hint.append(" choose", "dim")
+        hint.append("   esc", "cyan")
+        hint.append(" cancel", "dim")
+    hint_len = len(hint.plain)
+    left_pad = max(0, (avail - hint_len) // 2)
+    centered = Text()
+    centered.append(" " * left_pad)
+    centered.append_text(hint)
+    lines.append(_content_row(centered, w))
+
+    # ── Bottom border ──
+    bot = Text()
+    bot.append("╰", "dim")
+    bot.append("─" * (w - 2), "dim")
+    bot.append("╯", "dim")
+    lines.append(bot)
+
+    return lines
+
+
+def _run_create_flow(console: Console, project_name: str) -> tuple[str, str] | None:
+    """Interactive create flow. Returns (name, context_mode) or None on cancel."""
     fd = sys.stdin.fileno()
-    out_fd = sys.stdout.fileno()
     old = termios.tcgetattr(fd)
     buf: list[str] = []
+
     try:
         tty.setraw(fd)
+
+        # ── Step 1: branch name ──
         while True:
-            # Write directly to stdout fd — Rich console mangles ANSI escapes
-            line = f"\r  {prompt}{''.join(buf)}\x1b[K"
-            os.write(out_fd, line.encode())
+            # Render panel
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            console.clear()
+            panel = _render_create_panel(project_name, "".join(buf), "name", console.width)
+            for i, line in enumerate(panel):
+                if i < len(panel) - 1:
+                    console.print(line)
+                else:
+                    console.print(line, end="")
+            tty.setraw(fd)
+
             ch = os.read(fd, 1)
             if ch == b"\x1b":
                 return None
             elif ch == b"\x03":
                 return None
             elif ch in (b"\r", b"\n"):
-                return "".join(buf) if buf else None
-            elif ch in (b"\x7f", b"\x08"):  # backspace
+                if buf:
+                    break
+            elif ch in (b"\x7f", b"\x08"):
                 if buf:
                     buf.pop()
             elif ch.isascii() and ch >= b" ":
                 buf.append(ch.decode("utf-8", errors="replace"))
+
+        name = "".join(buf).strip().replace(" ", "-")
+
+        # ── Step 2: context mode ──
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        console.clear()
+        panel = _render_create_panel(project_name, name, "context", console.width)
+        for i, line in enumerate(panel):
+            if i < len(panel) - 1:
+                console.print(line)
+            else:
+                console.print(line, end="")
+        tty.setraw(fd)
+
+        ch = os.read(fd, 1)
+        if ch == b"\x1b" or ch == b"\x03":
+            return None
+
+        mode_map = {b"f": "fork", b"s": "summary", b"c": "fresh"}
+        context_mode = mode_map.get(ch, "fresh")
+
+        return name, context_mode
+
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -564,17 +723,9 @@ def run_worktree_strip() -> None:
                     break
             elif key == "n":
                 # ── Create new worktree ──
-                console.clear()
-                name = _read_line(console, f"  {_ICON_BRANCH} branch: ")
-                if name:
-                    name = name.strip().replace(" ", "-")
-                    console.print(
-                        "\n  context  [cyan]f[/cyan]ork  [cyan]s[/cyan]ummary  [cyan]c[/cyan]lean"
-                    )
-                    mode_key = _read_key()
-                    mode_map = {"f": "fork", "s": "summary", "c": "fresh"}
-                    context_mode = mode_map.get(mode_key, "fresh")
-
+                result = _run_create_flow(console, project_name)
+                if result:
+                    name, context_mode = result
                     try:
                         source_id = None
                         if context_mode == "fork":
