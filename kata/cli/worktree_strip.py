@@ -700,15 +700,19 @@ def _launch_worktree_session(
 
 
 def _rewrite_claude_cmd(cmd: str, context_mode: str, source_session_id: str | None) -> str:
-    """Rewrite a pane command if it's `claude` and we need to inject context flags."""
+    """Rewrite a pane command if it's `claude` and we need to inject context flags.
+
+    Uses --continue --fork-session (not --resume) because the JSONL's embedded
+    cwd points to the parent project, and --resume validates cwd matches.
+    --continue just picks the most recent session in the current project dir.
+    """
     if not isinstance(cmd, str):
         return cmd
 
-    # Match commands that are just "claude" or "claude <args>"
     stripped = cmd.strip()
     if stripped == "claude" or stripped.startswith("claude "):
         if context_mode == "fork" and source_session_id:
-            return f"claude --resume {source_session_id} --fork-session"
+            return "claude --continue --fork-session"
         elif context_mode == "summary":
             return "claude --continue"
     return cmd
@@ -959,10 +963,17 @@ def run_worktree_strip() -> None:
                 result = _run_create_flow(console, project_name, git_root)
                 if result:
                     name, context_mode = result
+                    out_fd = sys.stdout.fileno()
                     try:
                         source_id = None
                         if context_mode == "fork":
                             source_id = get_current_session_id(git_root)
+
+                        console.clear()
+                        os.write(
+                            out_fd,
+                            f"\r\n  \x1b[2mcreating worktree \x1b[0m\x1b[1m{name}\x1b[0m\x1b[2m...\x1b[0m".encode(),
+                        )
 
                         wt_info = create_worktree(
                             git_root,
@@ -971,19 +982,23 @@ def run_worktree_strip() -> None:
                             source_session_id=source_id,
                         )
 
-                        # Seed context (.claude/CLAUDE.md orientation)
                         wt_abs = str(Path(git_root) / wt_info.path)
+
+                        if context_mode != "fresh":
+                            os.write(
+                                out_fd,
+                                f"\r\n  \x1b[2mseeding context ({context_mode})...\x1b[0m".encode(),
+                            )
                         _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
 
-                        # Auto-switch to the new worktree
+                        os.write(out_fd, b"\r\n  \x1b[2mlaunching session...\x1b[0m")
+
                         worktrees = _refresh()
                         for idx, wt in enumerate(worktrees):
                             if wt.info.name == name:
                                 selected = idx
                                 break
 
-                        # Launch session with context — fork injects
-                        # --resume --fork-session into claude panes
                         _switch_to_worktree(
                             git_root,
                             project_name,
@@ -991,11 +1006,11 @@ def run_worktree_strip() -> None:
                             context_mode,
                             source_id,
                         )
-                        return  # Exit popup after switching
+                        return
 
                     except WorktreeError as e:
                         console.clear()
-                        console.print(f"  [red]error:[/red] {e}")
+                        os.write(out_fd, f"\r\n  \x1b[31merror:\x1b[0m {e}\r\n".encode())
                         _read_key()
 
                 worktrees = _refresh()
