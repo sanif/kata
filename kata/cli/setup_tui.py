@@ -97,6 +97,16 @@ def _has_tmux_detach() -> bool:
         return False
 
 
+def _has_tmux_worktree() -> bool:
+    tmux_conf = Path.home() / ".tmux.conf"
+    if not tmux_conf.exists():
+        return False
+    try:
+        return "worktree-strip" in tmux_conf.read_text()
+    except Exception:
+        return False
+
+
 def _detect_items() -> list[SetupGroup]:
     """Detect current state and build the item list."""
     claude_settings = Path.home() / ".claude" / "settings.json"
@@ -110,6 +120,7 @@ def _detect_items() -> list[SetupGroup]:
     switcher_ok = _has_tmux_switcher()
     notify_ok = _has_tmux_notify()
     detach_ok = _has_tmux_detach()
+    worktree_ok = _has_tmux_worktree()
 
     hooks = SetupGroup(
         "Hooks",
@@ -167,6 +178,14 @@ def _detect_items() -> list[SetupGroup]:
                 "Tmux Bindings",
                 checked=detach_ok,
                 configured=detach_ok,
+            ),
+            SetupItem(
+                "worktree",
+                "Ctrl+W",
+                "worktree manager",
+                "Tmux Bindings",
+                checked=worktree_ok,
+                configured=worktree_ok,
             ),
         ],
     )
@@ -483,6 +502,27 @@ def _apply_selections(groups: list[SetupGroup], console: Console) -> None:
             applied += 1
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Detach binding: {e}")
+
+    # Ctrl+W worktree
+    if selected.get("worktree"):
+        tmux_conf = Path.home() / ".tmux.conf"
+        marker = "# Kata workspace orchestrator"
+        try:
+            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
+            if "worktree-strip" not in existing:
+                with tmux_conf.open("a") as f:
+                    if marker not in existing:
+                        f.write(f"\n{marker}\n")
+                    f.write('bind-key -n C-w run-shell -b "kata worktree-strip"\n')
+            subprocess.run(
+                ["tmux", "bind-key", "-n", "C-w", "run-shell", "-b", "kata worktree-strip"],
+                capture_output=True,
+                timeout=SUBPROCESS_TIMEOUT,
+            )
+            console.print("[green]✓[/green] Ctrl+W worktree manager")
+            applied += 1
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Worktree binding: {e}")
 
     # terminal-notifier
     if selected.get("terminal-notifier"):

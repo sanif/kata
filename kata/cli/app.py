@@ -961,6 +961,19 @@ def switch_strip_cmd(
         open_switcher_popup(backward=backward)
 
 
+@app.command("worktree-strip", hidden=True)
+def worktree_strip_cmd(
+    popup: bool = typer.Option(False, "--popup", hidden=True, help="Run inside popup"),
+) -> None:
+    """Worktree manager popup for tmux overlay."""
+    from kata.cli.worktree_strip import open_worktree_popup, run_worktree_strip
+
+    if popup:
+        run_worktree_strip()
+    else:
+        open_worktree_popup()
+
+
 @app.command("_apply-color", hidden=True)
 def apply_color_cmd(
     session_name: str = typer.Argument(...),
