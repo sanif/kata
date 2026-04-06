@@ -90,6 +90,7 @@ Press `Enter` on any project to launch it. Press `Ctrl+Space` to switch between 
 | **Project** | Quick shortcuts | Assign `1`-`9` keys for instant project launch from dashboard |
 | **Project** | Zoxide recents | Frecency-sorted recent directories with adhoc sessions |
 | **Project** | Git integration | Branch, dirty state, upstream status at a glance |
+| **Project** | Worktrees | `Ctrl+W` popup — create, switch, delete worktrees with Claude context |
 | **Ops** | `kata setup` | Interactive setup for hooks, keybindings, tools |
 | **Ops** | `kata uninstall` | Clean removal of all hooks, configs, and the package |
 
@@ -106,6 +107,12 @@ Set via context menu (`m` → Set Color) in the dashboard.
 Assign number keys `1`-`9` to your most-used projects. Press the number directly in the dashboard to launch instantly — no scrolling, no searching.
 
 Set via context menu (`m` → Set Shortcut).
+
+### Worktrees
+
+Manage git worktrees for parallel development with isolated Claude Code sessions. Press `Ctrl+W` to create, switch, and delete worktrees — with options to fork, summarize, or start fresh Claude context.
+
+See [Worktree Guide](docs/worktrees.md) for details.
 
 ### Search, Context Menu & Settings
 
@@ -148,6 +155,7 @@ Set via context menu (`m` → Set Shortcut).
 |----------|-------------|
 | **[Full Guide](docs/guide.md)** | Installation, TUI shortcuts, configuration, themes, troubleshooting |
 | **[Architecture](docs/architecture/overview.md)** | System design, data flow, key decisions |
+| **[Worktrees](docs/worktrees.md)** | Git worktree management with Claude Code context |
 
 ---
 
