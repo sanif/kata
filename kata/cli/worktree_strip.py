@@ -212,6 +212,8 @@ def render_worktree_panel(
     hint = Text()
     hint.append("  n", "cyan")
     hint.append(" new", "dim")
+    hint.append("   C-w", "cyan")
+    hint.append(" next", "dim")
     hint.append("   ↵", "cyan")
     hint.append(" go", "dim")
     hint.append("   d", "cyan")
@@ -271,7 +273,9 @@ def _read_key() -> str:
     try:
         tty.setraw(fd)
         ch = os.read(fd, 1)
-        if ch == b"\x1b":
+        if ch == b"\x17":  # Ctrl+W
+            return "ctrl+w"
+        elif ch == b"\x1b":
             import select as _sel
 
             r, _, _ = _sel.select([fd], [], [], 0.1)
@@ -1042,6 +1046,19 @@ def run_worktree_strip() -> None:
         return wts
 
     worktrees = _refresh()
+
+    # Reorder: move current worktree to position 1 (Alt+Tab style)
+    # so pressing Ctrl+W once selects the previous worktree
+    if current_wt and len(worktrees) > 1:
+        current_idx = None
+        for i, wt in enumerate(worktrees):
+            if wt.info.name == current_wt or wt.info.branch == current_wt:
+                current_idx = i
+                break
+        if current_idx is not None and current_idx != 1:
+            current_item = worktrees.pop(current_idx)
+            worktrees.insert(1, current_item)
+
     selected = 0
     confirmed = False
 
@@ -1059,7 +1076,7 @@ def run_worktree_strip() -> None:
 
             key = _read_key()
 
-            if key in ("down", "j"):
+            if key in ("ctrl+w", "down", "j"):
                 selected = (selected + 1) % len(worktrees) if worktrees else 0
             elif key in ("up", "k"):
                 selected = (selected - 1) % len(worktrees) if worktrees else 0
