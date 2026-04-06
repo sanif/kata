@@ -294,12 +294,15 @@ def _read_key() -> str:
 def _read_line(console: Console, prompt: str) -> str | None:
     """Read a line of text input. Returns None on Esc/Ctrl+C."""
     fd = sys.stdin.fileno()
+    out_fd = sys.stdout.fileno()
     old = termios.tcgetattr(fd)
     buf: list[str] = []
     try:
         tty.setraw(fd)
         while True:
-            console.print(f"\r{prompt}{''.join(buf)}\x1b[K", end="")
+            # Write directly to stdout fd — Rich console mangles ANSI escapes
+            line = f"\r  {prompt}{''.join(buf)}\x1b[K"
+            os.write(out_fd, line.encode())
             ch = os.read(fd, 1)
             if ch == b"\x1b":
                 return None
