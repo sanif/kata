@@ -566,9 +566,31 @@ def _seed_context(
 
     branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
 
-    if context_mode == "fork":
-        # Write orientation context — the actual fork happens in
-        # _launch_worktree_session which injects --fork-session into claude panes
+    if context_mode == "fork" and source_session_id:
+        # Copy the parent's session JSONL into the worktree's Claude project dir
+        # so `claude --resume <id> --fork-session` can find it
+        from kata.utils.claude_sessions import _encode_cwd
+
+        claude_dir = Path.home() / ".claude"
+        src_encoded = _encode_cwd(project_path)
+        src_session_dir = claude_dir / "projects" / src_encoded
+        src_session = src_session_dir / f"{source_session_id}.jsonl"
+
+        if src_session.exists():
+            wt_resolved = str(Path(wt_path).resolve())
+            dst_encoded = _encode_cwd(wt_resolved)
+            dst_session_dir = claude_dir / "projects" / dst_encoded
+            dst_session_dir.mkdir(parents=True, exist_ok=True)
+            dst_session = dst_session_dir / f"{source_session_id}.jsonl"
+
+            try:
+                import shutil
+
+                shutil.copy2(str(src_session), str(dst_session))
+            except OSError:
+                pass  # Non-fatal — --fork-session will fail gracefully
+
+        # Write orientation context
         wt_claude_dir = Path(wt_path) / ".claude"
         wt_claude_dir.mkdir(exist_ok=True)
         orientation = wt_claude_dir / "CLAUDE.md"
@@ -979,27 +1001,33 @@ def run_worktree_strip() -> None:
                 worktrees = _refresh()
                 selected = min(selected, len(worktrees) - 1) if worktrees else 0
 
-            elif key == "d":
+            elif key in ("d", "D"):
                 if worktrees and not worktrees[selected].is_main:
+                    wt_name = worktrees[selected].info.name
+                    force = key == "D"
                     try:
-                        delete_worktree(git_root, worktrees[selected].info.name)
+                        delete_worktree(git_root, wt_name, force=force)
                         worktrees = _refresh()
                         selected = min(selected, len(worktrees) - 1) if worktrees else 0
                     except WorktreeError as e:
+                        # Show error with option to force delete
                         console.clear()
-                        console.print(f"  [red]error:[/red] {e}")
-                        _read_key()
-
-            elif key == "D":
-                if worktrees and not worktrees[selected].is_main:
-                    try:
-                        delete_worktree(git_root, worktrees[selected].info.name, force=True)
-                        worktrees = _refresh()
-                        selected = min(selected, len(worktrees) - 1) if worktrees else 0
-                    except WorktreeError as e:
-                        console.clear()
-                        console.print(f"  [red]error:[/red] {e}")
-                        _read_key()
+                        err_msg = str(e)
+                        out_fd = sys.stdout.fileno()
+                        os.write(
+                            out_fd,
+                            f"\r\n  \x1b[31merror:\x1b[0m {err_msg}\r\n\r\n"
+                            f"  \x1b[36mD\x1b[0m force delete   "
+                            f"\x1b[2many other key to cancel\x1b[0m\r\n".encode(),
+                        )
+                        retry_key = _read_key()
+                        if retry_key == "D":
+                            try:
+                                delete_worktree(git_root, wt_name, force=True)
+                                worktrees = _refresh()
+                                selected = min(selected, len(worktrees) - 1) if worktrees else 0
+                            except WorktreeError:
+                                pass  # Give up silently
 
             elif key in ("q", "escape"):
                 break

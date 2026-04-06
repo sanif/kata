@@ -134,10 +134,24 @@ def delete_worktree(project_path: Path | str, name: str, force: bool = False) ->
         raise WorktreeError(f"Worktree '{name}' not found")
 
     abs_wt_path = project_path / wt.path
+
+    # Clean up kata-generated files that would block git worktree remove
+    _cleanup_worktree_files(abs_wt_path)
+
+    # Kill any tmux session using this worktree
+    _kill_worktree_session(abs_wt_path)
+
     args = ["worktree", "remove", str(abs_wt_path)]
     if force:
         args.append("--force")
     result = _run_git(args, project_path)
+
+    # If safe remove fails due to untracked files, retry with --force
+    if result and result.returncode != 0 and not force:
+        if "untracked" in (result.stderr or "") or "modified" in (result.stderr or ""):
+            args.append("--force")
+            result = _run_git(args, project_path)
+
     if result is None or result.returncode != 0:
         stderr = result.stderr if result else "git command failed"
         raise WorktreeError(f"Failed to remove worktree: {stderr}")
@@ -147,6 +161,54 @@ def delete_worktree(project_path: Path | str, name: str, force: bool = False) ->
 
     existing = [w for w in existing if w.name != name]
     _save_metadata(project_path, existing)
+
+
+def _cleanup_worktree_files(wt_path: Path) -> None:
+    """Remove kata-generated files from a worktree before deletion."""
+    import shutil
+
+    # Remove .claude/ dir we created for context seeding
+    claude_dir = wt_path / ".claude"
+    if claude_dir.exists():
+        shutil.rmtree(claude_dir, ignore_errors=True)
+
+    # Remove symlinks we created
+    for name in [".kata.yaml", ".env", "node_modules", ".venv"]:
+        target = wt_path / name
+        if target.is_symlink():
+            target.unlink()
+
+
+def _kill_worktree_session(wt_path: Path) -> None:
+    """Kill any tmux session whose start directory matches this worktree."""
+    try:
+        result = subprocess.run(
+            [
+                "tmux",
+                "list-sessions",
+                "-F",
+                "#{session_name}|#{session_path}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return
+
+        wt_str = str(wt_path.resolve())
+        for line in result.stdout.strip().split("\n"):
+            if "|" not in line:
+                continue
+            session_name, session_path = line.split("|", 1)
+            if session_path == wt_str:
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", session_name],
+                    capture_output=True,
+                    timeout=SUBPROCESS_TIMEOUT,
+                )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
 
 
 def list_worktrees(project_path: Path | str) -> list[WorktreeStatus]:
