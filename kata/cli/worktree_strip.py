@@ -296,6 +296,7 @@ def _render_create_panel(
     buf: str,
     step: str,  # "name" or "context"
     term_width: int,
+    has_claude: bool = False,
 ) -> list[Text]:
     """Render the create-worktree panel with inline input."""
     w = term_width
@@ -345,34 +346,44 @@ def _render_create_panel(
 
         # ── Context mode selection ──
         mode_label = Text()
-        mode_label.append("  context mode", "dim")
+        mode_label.append("  claude context", "dim")
         lines.append(_content_row(mode_label, w))
 
         lines.append(_content_row(Text(""), w))
 
-        opt_f = Text()
-        opt_f.append("  [", "dim")
-        opt_f.append("f", "cyan bold")
-        opt_f.append("]", "dim")
-        opt_f.append(" fork", "")
-        opt_f.append("      carry full Claude session", "dim")
-        lines.append(_content_row(opt_f, w))
+        if has_claude:
+            opt_f = Text()
+            opt_f.append("  [", "dim")
+            opt_f.append("f", "cyan bold")
+            opt_f.append("]", "dim")
+            opt_f.append(" fork", "")
+            opt_f.append("      carry full session", "dim")
+            lines.append(_content_row(opt_f, w))
 
-        opt_s = Text()
-        opt_s.append("  [", "dim")
-        opt_s.append("s", "cyan bold")
-        opt_s.append("]", "dim")
-        opt_s.append(" summary", "")
-        opt_s.append("   seed with session summary", "dim")
-        lines.append(_content_row(opt_s, w))
+            opt_s = Text()
+            opt_s.append("  [", "dim")
+            opt_s.append("s", "cyan bold")
+            opt_s.append("]", "dim")
+            opt_s.append(" summary", "")
+            opt_s.append("   seed with summary", "dim")
+            lines.append(_content_row(opt_s, w))
 
         opt_c = Text()
         opt_c.append("  [", "dim")
         opt_c.append("c", "cyan bold")
         opt_c.append("]", "dim")
         opt_c.append(" clean", "")
-        opt_c.append("     start fresh", "dim")
+        if has_claude:
+            opt_c.append("     no Claude context", "dim")
+        else:
+            opt_c.append("     start fresh", "dim")
         lines.append(_content_row(opt_c, w))
+
+        if not has_claude:
+            lines.append(_content_row(Text(""), w))
+            no_claude = Text()
+            no_claude.append("  no active Claude session", "dim italic")
+            lines.append(_content_row(no_claude, w))
 
     lines.append(_content_row(Text(""), w))
 
@@ -391,10 +402,11 @@ def _render_create_panel(
         hint.append("   esc", "cyan")
         hint.append(" cancel", "dim")
     else:
-        hint.append("  f", "cyan")
-        hint.append("/", "dim")
-        hint.append("s", "cyan")
-        hint.append("/", "dim")
+        if has_claude:
+            hint.append("  f", "cyan")
+            hint.append("/", "dim")
+            hint.append("s", "cyan")
+            hint.append("/", "dim")
         hint.append("c", "cyan")
         hint.append(" choose", "dim")
         hint.append("   esc", "cyan")
@@ -416,21 +428,33 @@ def _render_create_panel(
     return lines
 
 
-def _run_create_flow(console: Console, project_name: str) -> tuple[str, str] | None:
-    """Interactive create flow. Returns (name, context_mode) or None on cancel."""
+def _run_create_flow(console: Console, project_name: str, git_root: str) -> tuple[str, str] | None:
+    """Interactive create flow. Returns (name, context_mode) or None on cancel.
+
+    Only shows fork/summary options when an active Claude session exists
+    for this project.
+    """
+    from kata.core.config import get_project_config_path
+
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf: list[str] = []
+
+    # Detect if Claude is active for this project
+    has_claude = _has_claude_session(git_root) and _config_has_claude(
+        get_project_config_path(git_root)
+    )
 
     try:
         tty.setraw(fd)
 
         # ── Step 1: branch name ──
         while True:
-            # Render panel
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
             console.clear()
-            panel = _render_create_panel(project_name, "".join(buf), "name", console.width)
+            panel = _render_create_panel(
+                project_name, "".join(buf), "name", console.width, has_claude
+            )
             for i, line in enumerate(panel):
                 if i < len(panel) - 1:
                     console.print(line)
@@ -457,7 +481,7 @@ def _run_create_flow(console: Console, project_name: str) -> tuple[str, str] | N
         # ── Step 2: context mode ──
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         console.clear()
-        panel = _render_create_panel(project_name, name, "context", console.width)
+        panel = _render_create_panel(project_name, name, "context", console.width, has_claude)
         for i, line in enumerate(panel):
             if i < len(panel) - 1:
                 console.print(line)
@@ -469,13 +493,52 @@ def _run_create_flow(console: Console, project_name: str) -> tuple[str, str] | N
         if ch == b"\x1b" or ch == b"\x03":
             return None
 
-        mode_map = {b"f": "fork", b"s": "summary", b"c": "fresh"}
+        if has_claude:
+            mode_map = {b"f": "fork", b"s": "summary", b"c": "fresh"}
+        else:
+            mode_map = {b"c": "fresh"}
         context_mode = mode_map.get(ch, "fresh")
 
         return name, context_mode
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+# ── Claude detection ────────────────────────────────────────────────────
+
+
+def _has_claude_session(project_path: str) -> bool:
+    """Check if there's an active Claude Code session for this project."""
+    from kata.utils.claude_sessions import get_current_session_id
+
+    return get_current_session_id(project_path) is not None
+
+
+def _config_has_claude(config_path) -> bool:
+    """Check if a .kata.yaml config has any panes running claude."""
+    from pathlib import Path
+
+    path = Path(config_path)
+    if not path.exists():
+        return False
+    try:
+        import yaml
+
+        config = yaml.safe_load(path.read_text())
+        for window in config.get("windows", []):
+            for pane in window.get("panes", []):
+                if isinstance(pane, dict):
+                    cmds = pane.get("shell_command", [])
+                    if isinstance(cmds, list):
+                        for cmd in cmds:
+                            if isinstance(cmd, str) and "claude" in cmd:
+                                return True
+                elif isinstance(pane, str) and "claude" in pane:
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 # ── Context seeding ─────────────────────────────────────────────────────
@@ -486,69 +549,44 @@ def _seed_context(
     wt_path: str,
     wt_info,
     context_mode: str,
+    source_session_id: str | None = None,
 ) -> None:
     """Seed Claude context in the new worktree based on mode.
 
-    Fork: copies the session JSONL so `claude --continue` in the worktree
-    picks up the full conversation history.
+    Fork: uses `claude --resume <id> --fork-session` in the worktree's
+    claude panes (injected by _launch_worktree_session).
+    Also writes orientation .claude/CLAUDE.md.
 
-    Summary: writes a .claude-context.md that Claude Code will auto-discover
-    as a project-level CLAUDE.md addendum.
+    Summary: writes session summary to .claude/CLAUDE.md where
+    Claude Code auto-discovers it.
     """
     from pathlib import Path
 
-    from kata.utils.claude_sessions import (
-        _encode_cwd,
-        _find_latest_session,
-        get_current_session_id,
-        get_session_summary,
-    )
+    from kata.utils.claude_sessions import get_session_summary
+
+    branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
 
     if context_mode == "fork":
-        session_id = get_current_session_id(project_path)
-        if session_id:
-            # Copy the session JSONL into the worktree's Claude project dir
-            # so `claude --continue` in the worktree has the full history
-            claude_dir = Path.home() / ".claude"
-            src_encoded = _encode_cwd(project_path)
-            src_session_dir = claude_dir / "projects" / src_encoded
-            src_session = _find_latest_session(src_session_dir)
-
-            if src_session:
-                dst_encoded = _encode_cwd(str(Path(wt_path).resolve()))
-                dst_session_dir = claude_dir / "projects" / dst_encoded
-                dst_session_dir.mkdir(parents=True, exist_ok=True)
-                dst_session = dst_session_dir / src_session.name
-
-                try:
-                    import shutil
-
-                    shutil.copy2(str(src_session), str(dst_session))
-                except OSError:
-                    pass  # Non-fatal — Claude will just start fresh
-
-            # Write orientation context as CLAUDE.md addendum
-            wt_claude_dir = Path(wt_path) / ".claude"
-            wt_claude_dir.mkdir(exist_ok=True)
-            orientation = wt_claude_dir / "CLAUDE.md"
-            branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
-            orientation.write_text(
-                f"# Worktree Context\n\n"
-                f"This is a worktree forked from the main project.\n"
-                f"Branch: {branch}\n"
-                f"Parent: {project_path}\n\n"
-                f"File paths from the parent conversation exist at the same "
-                f"relative paths here.\n"
-            )
+        # Write orientation context — the actual fork happens in
+        # _launch_worktree_session which injects --fork-session into claude panes
+        wt_claude_dir = Path(wt_path) / ".claude"
+        wt_claude_dir.mkdir(exist_ok=True)
+        orientation = wt_claude_dir / "CLAUDE.md"
+        orientation.write_text(
+            f"# Worktree Context\n\n"
+            f"This is a worktree forked from the main project.\n"
+            f"Branch: {branch}\n"
+            f"Parent: {project_path}\n\n"
+            f"File paths from the parent conversation exist at the same "
+            f"relative paths here.\n"
+        )
 
     elif context_mode == "summary":
         summary = get_session_summary(project_path)
         if summary:
-            # Write as .claude/CLAUDE.md so Claude auto-discovers it
             wt_claude_dir = Path(wt_path) / ".claude"
             wt_claude_dir.mkdir(exist_ok=True)
             orientation = wt_claude_dir / "CLAUDE.md"
-            branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
             orientation.write_text(
                 f"# Worktree Context\n\n"
                 f"This worktree was created from the main project.\n"
@@ -571,8 +609,17 @@ def _get_worktree_session_name(project_name: str, wt_name: str) -> str:
     return sanitize_session_name(f"{project_name}:{wt_name}")
 
 
-def _launch_worktree_session(wt_abs: str, session_name: str) -> str:
+def _launch_worktree_session(
+    wt_abs: str,
+    session_name: str,
+    context_mode: str = "fresh",
+    source_session_id: str | None = None,
+) -> str:
     """Launch a tmux session for a worktree, using parent's .kata.yaml if available.
+
+    If context_mode is "fork" and source_session_id is set, any panes that run
+    `claude` will be rewritten to `claude --resume <id> --fork-session` so the
+    forked session starts automatically.
 
     Falls back to adhoc session (auto-detected project type) if no config exists.
     """
@@ -585,19 +632,25 @@ def _launch_worktree_session(wt_abs: str, session_name: str) -> str:
 
     config_path = get_project_config_path(wt_abs)
     if config_path.exists():
-        # .kata.yaml exists (symlinked from parent) — load it with overrides
         try:
             config = yaml.safe_load(config_path.read_text())
-            # Override session_name and start_directory for this worktree
             config["session_name"] = session_name
             config["start_directory"] = wt_abs
-            # Update start_directory in all windows too
+
             for window in config.get("windows", []):
                 if "start_directory" not in window:
                     window["start_directory"] = wt_abs
                 for pane in window.get("panes", []):
-                    if isinstance(pane, dict) and "start_directory" not in pane:
-                        pane["start_directory"] = wt_abs
+                    if isinstance(pane, dict):
+                        if "start_directory" not in pane:
+                            pane["start_directory"] = wt_abs
+                        # Inject --fork-session into claude panes
+                        cmds = pane.get("shell_command", [])
+                        if isinstance(cmds, list):
+                            pane["shell_command"] = [
+                                _rewrite_claude_cmd(cmd, context_mode, source_session_id)
+                                for cmd in cmds
+                            ]
 
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".yaml", prefix="kata-wt-", delete=False
@@ -614,7 +667,6 @@ def _launch_worktree_session(wt_abs: str, session_name: str) -> str:
                     text=True,
                 )
                 if result.returncode != 0:
-                    # Fall back to adhoc
                     return launch_adhoc_session(wt_abs, session_name=session_name)
                 return session_name
             finally:
@@ -625,7 +677,28 @@ def _launch_worktree_session(wt_abs: str, session_name: str) -> str:
         return launch_adhoc_session(wt_abs, session_name=session_name)
 
 
-def _switch_to_worktree(project_path: str, project_name: str, wt: WorktreeStatus) -> None:
+def _rewrite_claude_cmd(cmd: str, context_mode: str, source_session_id: str | None) -> str:
+    """Rewrite a pane command if it's `claude` and we need to inject context flags."""
+    if not isinstance(cmd, str):
+        return cmd
+
+    # Match commands that are just "claude" or "claude <args>"
+    stripped = cmd.strip()
+    if stripped == "claude" or stripped.startswith("claude "):
+        if context_mode == "fork" and source_session_id:
+            return f"claude --resume {source_session_id} --fork-session"
+        elif context_mode == "summary":
+            return "claude --continue"
+    return cmd
+
+
+def _switch_to_worktree(
+    project_path: str,
+    project_name: str,
+    wt: WorktreeStatus,
+    context_mode: str = "fresh",
+    source_session_id: str | None = None,
+) -> None:
     """Switch to a worktree's tmux session, launching if needed."""
     from pathlib import Path
 
@@ -646,7 +719,7 @@ def _switch_to_worktree(project_path: str, project_name: str, wt: WorktreeStatus
     else:
         import time
 
-        _launch_worktree_session(wt_abs, session_name)
+        _launch_worktree_session(wt_abs, session_name, context_mode, source_session_id)
         for _ in range(20):
             if session_exists(session_name):
                 break
@@ -861,7 +934,7 @@ def run_worktree_strip() -> None:
                     break
             elif key == "n":
                 # ── Create new worktree ──
-                result = _run_create_flow(console, project_name)
+                result = _run_create_flow(console, project_name, git_root)
                 if result:
                     name, context_mode = result
                     try:
@@ -876,16 +949,27 @@ def run_worktree_strip() -> None:
                             source_session_id=source_id,
                         )
 
-                        # Seed context
+                        # Seed context (.claude/CLAUDE.md orientation)
                         wt_abs = str(Path(git_root) / wt_info.path)
-                        _seed_context(git_root, wt_abs, wt_info, context_mode)
+                        _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
 
-                        # Refresh and select new worktree
+                        # Auto-switch to the new worktree
                         worktrees = _refresh()
                         for idx, wt in enumerate(worktrees):
                             if wt.info.name == name:
                                 selected = idx
                                 break
+
+                        # Launch session with context — fork injects
+                        # --resume --fork-session into claude panes
+                        _switch_to_worktree(
+                            git_root,
+                            project_name,
+                            worktrees[selected],
+                            context_mode,
+                            source_id,
+                        )
+                        return  # Exit popup after switching
 
                     except WorktreeError as e:
                         console.clear()
