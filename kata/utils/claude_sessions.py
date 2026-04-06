@@ -84,10 +84,32 @@ def get_current_session_id(
     worktree_path: str,
     claude_dir: Path | None = None,
 ) -> str | None:
-    """Get the session ID of the most recent Claude session for a path."""
+    """Get the session ID of the active Claude session for a path.
+
+    First checks ~/.claude/sessions/*.json for a running process whose cwd
+    matches. Falls back to the most recently modified JSONL if no active
+    process is found.
+    """
     if claude_dir is None:
         claude_dir = Path.home() / ".claude"
 
+    resolved = str(Path(worktree_path).resolve())
+
+    # Try to find an active session process for this cwd
+    sessions_dir = claude_dir / "sessions"
+    if sessions_dir.exists():
+        for pid_file in sessions_dir.glob("*.json"):
+            try:
+                data = json.loads(pid_file.read_text())
+                session_cwd = data.get("cwd", "")
+                if str(Path(session_cwd).resolve()) == resolved:
+                    session_id = data.get("sessionId")
+                    if session_id:
+                        return session_id
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    # Fall back to most recently modified JSONL
     encoded = _encode_cwd(worktree_path)
     session_dir = claude_dir / "projects" / encoded
 
