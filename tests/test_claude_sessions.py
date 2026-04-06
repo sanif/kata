@@ -2,7 +2,9 @@ import json
 
 from kata.utils.claude_sessions import (
     _encode_cwd,
+    _extract_last_assistant_text,
     _find_latest_session,
+    get_current_session_id,
     get_session_summary,
 )
 
@@ -83,4 +85,55 @@ class TestGetSessionSummary:
 
         result = get_session_summary("/tmp/myproject", claude_dir=tmp_path / ".claude")
         assert result is not None
-        assert len(result) <= 80
+        assert len(result) == 72
+
+
+class TestExtractLastAssistantText:
+    def test_extracts_string_content(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        lines = [
+            json.dumps({"type": "assistant", "message": {"content": "plain string response"}}),
+        ]
+        session_file.write_text("\n".join(lines) + "\n")
+        result = _extract_last_assistant_text(session_file)
+        assert result == "plain string response"
+
+    def test_extracts_list_content(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        lines = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "text", "text": "list response"}]},
+                }
+            ),
+        ]
+        session_file.write_text("\n".join(lines) + "\n")
+        result = _extract_last_assistant_text(session_file)
+        assert result == "list response"
+
+    def test_returns_none_for_no_assistant(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        lines = [json.dumps({"type": "human", "message": {"content": "hello"}})]
+        session_file.write_text("\n".join(lines) + "\n")
+        result = _extract_last_assistant_text(session_file)
+        assert result is None
+
+    def test_handles_malformed_jsonl(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        session_file.write_text("not json\n{bad json}\n")
+        result = _extract_last_assistant_text(session_file)
+        assert result is None
+
+
+class TestGetCurrentSessionId:
+    def test_returns_session_id(self, tmp_path):
+        session_dir = tmp_path / ".claude" / "projects" / "-tmp-myproject"
+        session_dir.mkdir(parents=True)
+        (session_dir / "abc-def-123.jsonl").write_text("{}\n")
+        result = get_current_session_id("/tmp/myproject", claude_dir=tmp_path / ".claude")
+        assert result == "abc-def-123"
+
+    def test_returns_none_when_no_sessions(self, tmp_path):
+        result = get_current_session_id("/tmp/nonexistent", claude_dir=tmp_path / ".claude")
+        assert result is None
