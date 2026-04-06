@@ -76,16 +76,13 @@ def _symlink_shared_files(project_path: Path, wt_path: Path) -> None:
         target = wt_path / name
         if source.exists() and not target.exists():
             target.symlink_to(source)
-    # Symlink kata config yamls (tmuxp configs)
-    for yaml_file in project_path.glob("*.yaml"):
-        target = wt_path / yaml_file.name
-        if not target.exists() and not yaml_file.is_symlink():
-            try:
-                content = yaml_file.read_text()
-                if "session_name:" in content or "start_directory:" in content:
-                    target.symlink_to(yaml_file)
-            except Exception:
-                pass
+
+    # Symlink .kata.yaml (the primary kata config — dotfile, not matched by *.yaml)
+    kata_config = project_path / ".kata.yaml"
+    if kata_config.exists():
+        target = wt_path / ".kata.yaml"
+        if not target.exists():
+            target.symlink_to(kata_config)
 
 
 def create_worktree(

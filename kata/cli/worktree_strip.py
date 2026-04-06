@@ -487,23 +487,76 @@ def _seed_context(
     wt_info,
     context_mode: str,
 ) -> None:
-    """Seed Claude context in the new worktree based on mode."""
-    from kata.utils.claude_sessions import get_current_session_id, get_session_summary
+    """Seed Claude context in the new worktree based on mode.
+
+    Fork: copies the session JSONL so `claude --continue` in the worktree
+    picks up the full conversation history.
+
+    Summary: writes a .claude-context.md that Claude Code will auto-discover
+    as a project-level CLAUDE.md addendum.
+    """
+    from pathlib import Path
+
+    from kata.utils.claude_sessions import (
+        _encode_cwd,
+        _find_latest_session,
+        get_current_session_id,
+        get_session_summary,
+    )
 
     if context_mode == "fork":
         session_id = get_current_session_id(project_path)
         if session_id:
-            # Fork the session — claude will be launched with --resume --fork-session
-            # Store the session ID in metadata (already done by caller)
-            pass
+            # Copy the session JSONL into the worktree's Claude project dir
+            # so `claude --continue` in the worktree has the full history
+            claude_dir = Path.home() / ".claude"
+            src_encoded = _encode_cwd(project_path)
+            src_session_dir = claude_dir / "projects" / src_encoded
+            src_session = _find_latest_session(src_session_dir)
+
+            if src_session:
+                dst_encoded = _encode_cwd(str(Path(wt_path).resolve()))
+                dst_session_dir = claude_dir / "projects" / dst_encoded
+                dst_session_dir.mkdir(parents=True, exist_ok=True)
+                dst_session = dst_session_dir / src_session.name
+
+                try:
+                    import shutil
+
+                    shutil.copy2(str(src_session), str(dst_session))
+                except OSError:
+                    pass  # Non-fatal — Claude will just start fresh
+
+            # Write orientation context as CLAUDE.md addendum
+            wt_claude_dir = Path(wt_path) / ".claude"
+            wt_claude_dir.mkdir(exist_ok=True)
+            orientation = wt_claude_dir / "CLAUDE.md"
+            branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
+            orientation.write_text(
+                f"# Worktree Context\n\n"
+                f"This is a worktree forked from the main project.\n"
+                f"Branch: {branch}\n"
+                f"Parent: {project_path}\n\n"
+                f"File paths from the parent conversation exist at the same "
+                f"relative paths here.\n"
+            )
 
     elif context_mode == "summary":
         summary = get_session_summary(project_path)
         if summary:
-            from pathlib import Path
-
-            context_file = Path(wt_path) / ".claude-context.txt"
-            context_file.write_text(f"Previous session context from parent project:\n{summary}\n")
+            # Write as .claude/CLAUDE.md so Claude auto-discovers it
+            wt_claude_dir = Path(wt_path) / ".claude"
+            wt_claude_dir.mkdir(exist_ok=True)
+            orientation = wt_claude_dir / "CLAUDE.md"
+            branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
+            orientation.write_text(
+                f"# Worktree Context\n\n"
+                f"This worktree was created from the main project.\n"
+                f"Branch: {branch}\n"
+                f"Parent: {project_path}\n\n"
+                f"## Previous Session Summary\n\n"
+                f"{summary}\n"
+            )
 
 
 # ── Session management ──────────────────────────────────────────────────
@@ -518,11 +571,65 @@ def _get_worktree_session_name(project_name: str, wt_name: str) -> str:
     return sanitize_session_name(f"{project_name}:{wt_name}")
 
 
+def _launch_worktree_session(wt_abs: str, session_name: str) -> str:
+    """Launch a tmux session for a worktree, using parent's .kata.yaml if available.
+
+    Falls back to adhoc session (auto-detected project type) if no config exists.
+    """
+    import tempfile
+
+    import yaml
+
+    from kata.core.config import get_project_config_path
+    from kata.services.sessions import launch_adhoc_session
+
+    config_path = get_project_config_path(wt_abs)
+    if config_path.exists():
+        # .kata.yaml exists (symlinked from parent) — load it with overrides
+        try:
+            config = yaml.safe_load(config_path.read_text())
+            # Override session_name and start_directory for this worktree
+            config["session_name"] = session_name
+            config["start_directory"] = wt_abs
+            # Update start_directory in all windows too
+            for window in config.get("windows", []):
+                if "start_directory" not in window:
+                    window["start_directory"] = wt_abs
+                for pane in window.get("panes", []):
+                    if isinstance(pane, dict) and "start_directory" not in pane:
+                        pane["start_directory"] = wt_abs
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", prefix="kata-wt-", delete=False
+            ) as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+                temp_path = f.name
+
+            from pathlib import Path
+
+            try:
+                result = subprocess.run(
+                    ["tmuxp", "load", "-d", temp_path],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    # Fall back to adhoc
+                    return launch_adhoc_session(wt_abs, session_name=session_name)
+                return session_name
+            finally:
+                Path(temp_path).unlink(missing_ok=True)
+        except Exception:
+            return launch_adhoc_session(wt_abs, session_name=session_name)
+    else:
+        return launch_adhoc_session(wt_abs, session_name=session_name)
+
+
 def _switch_to_worktree(project_path: str, project_name: str, wt: WorktreeStatus) -> None:
     """Switch to a worktree's tmux session, launching if needed."""
     from pathlib import Path
 
-    from kata.services.sessions import launch_adhoc_session, session_exists
+    from kata.services.sessions import session_exists
 
     session_name = _get_worktree_session_name(project_name, wt.info.name)
 
@@ -539,7 +646,7 @@ def _switch_to_worktree(project_path: str, project_name: str, wt: WorktreeStatus
     else:
         import time
 
-        launch_adhoc_session(wt_abs, session_name=session_name)
+        _launch_worktree_session(wt_abs, session_name)
         for _ in range(20):
             if session_exists(session_name):
                 break
