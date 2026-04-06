@@ -86,3 +86,48 @@ class Project:
         """Record that the project was opened."""
         self.last_opened = datetime.now()
         self.times_opened += 1
+
+
+@dataclass
+class WorktreeInfo:
+    """Metadata for a git worktree managed by kata."""
+
+    name: str
+    branch: str
+    path: str  # relative to project root
+    created_at: datetime
+    context_mode: str  # "fork" | "summary" | "fresh"
+    source_session_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "branch": self.branch,
+            "path": self.path,
+            "created_at": self.created_at.isoformat(),
+            "context_mode": self.context_mode,
+            "source_session_id": self.source_session_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WorktreeInfo":
+        return cls(
+            name=data["name"],
+            branch=data["branch"],
+            path=data["path"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            context_mode=data.get("context_mode", "fresh"),
+            source_session_id=data.get("source_session_id"),
+        )
+
+
+@dataclass
+class WorktreeStatus:
+    """Runtime status of a worktree including git and session state."""
+
+    info: WorktreeInfo
+    is_main: bool
+    dirty: bool
+    changed_files: int
+    session_summary: str | None
+    session_active: bool
