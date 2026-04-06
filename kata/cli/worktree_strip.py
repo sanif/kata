@@ -26,6 +26,7 @@ from kata.core.models import WorktreeStatus
 _ICON_BRANCH = ""
 _ICON_WORKTREE = ""
 _MIN_WIDTH = 46
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 # ── Rendering ────────────────────────────────────────────────────────────
@@ -505,6 +506,114 @@ def _run_create_flow(console: Console, project_name: str, git_root: str) -> tupl
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+# ── Loading panel ───────────────────────────────────────────────────────
+
+
+def _render_loading_panel(
+    project_name: str,
+    wt_name: str,
+    status: str,
+    spinner_frame: int,
+    term_width: int,
+) -> list[Text]:
+    """Render a bordered loading panel with animated spinner."""
+    w = term_width
+    lines: list[Text] = []
+
+    # ── Top border ──
+    title = f" {_ICON_WORKTREE} new worktree "
+    side = (w - 2 - len(title)) // 2
+    top = Text()
+    top.append("╭", "dim")
+    top.append("─" * side, "dim")
+    top.append(title, "bold cyan")
+    top.append("─" * (w - 2 - side - len(title)), "dim")
+    top.append("╮", "dim")
+    lines.append(top)
+
+    lines.append(_content_row(Text(""), w))
+
+    # ── Branch name ──
+    branch = Text()
+    branch.append(f"  {_ICON_BRANCH} ", "dim")
+    branch.append(wt_name, "bold")
+    lines.append(_content_row(branch, w))
+
+    lines.append(_content_row(Text(""), w))
+
+    # ── Spinner + status ──
+    frame = _SPINNER_FRAMES[spinner_frame % len(_SPINNER_FRAMES)]
+    spinner = Text()
+    spinner.append(f"  {frame} ", "cyan")
+    spinner.append(status, "dim")
+    lines.append(_content_row(spinner, w))
+
+    lines.append(_content_row(Text(""), w))
+
+    # ── Bottom border ──
+    bot = Text()
+    bot.append("╰", "dim")
+    bot.append("─" * (w - 2), "dim")
+    bot.append("╯", "dim")
+    lines.append(bot)
+
+    return lines
+
+
+def _run_create_with_spinner(
+    console: Console,
+    project_name: str,
+    git_root: str,
+    name: str,
+    context_mode: str,
+    source_id: str | None,
+    create_fn,
+) -> None:
+    """Run worktree creation with animated spinner in a bordered panel."""
+    import threading
+    import time
+
+    status_text = "creating worktree..."
+    error_ref: list[Exception] = []
+    done = threading.Event()
+    frame = [0]
+
+    def _work():
+        nonlocal status_text
+        try:
+            status_text = "creating worktree..."
+            create_fn(
+                git_root,
+                name,
+                context_mode=context_mode,
+                source_session_id=source_id,
+            )
+            status_text = "done"
+        except Exception as e:
+            error_ref.append(e)
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=_work, daemon=True)
+    worker.start()
+
+    while not done.is_set():
+        console.clear()
+        panel = _render_loading_panel(project_name, name, status_text, frame[0], console.width)
+        for i, line in enumerate(panel):
+            if i < len(panel) - 1:
+                console.print(line)
+            else:
+                console.print(line, end="")
+        frame[0] += 1
+        time.sleep(0.08)
+
+    worker.join()
+
+    if error_ref:
+        raise error_ref[0]
+
+
 # ── Claude detection ────────────────────────────────────────────────────
 
 
@@ -963,35 +1072,33 @@ def run_worktree_strip() -> None:
                 result = _run_create_flow(console, project_name, git_root)
                 if result:
                     name, context_mode = result
-                    out_fd = sys.stdout.fileno()
                     try:
                         source_id = None
                         if context_mode == "fork":
                             source_id = get_current_session_id(git_root)
 
-                        console.clear()
-                        os.write(
-                            out_fd,
-                            f"\r\n  \x1b[2mcreating worktree \x1b[0m\x1b[1m{name}\x1b[0m\x1b[2m...\x1b[0m".encode(),
-                        )
-
-                        wt_info = create_worktree(
+                        _run_create_with_spinner(
+                            console,
+                            project_name,
                             git_root,
                             name,
-                            context_mode=context_mode,
-                            source_session_id=source_id,
+                            context_mode,
+                            source_id,
+                            create_worktree,
                         )
 
-                        wt_abs = str(Path(git_root) / wt_info.path)
+                        wt_info_path = f".worktrees/{name}"
+                        wt_abs = str(Path(git_root) / wt_info_path)
 
-                        if context_mode != "fresh":
-                            os.write(
-                                out_fd,
-                                f"\r\n  \x1b[2mseeding context ({context_mode})...\x1b[0m".encode(),
-                            )
-                        _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
+                        # Load the created worktree info for context seeding
+                        from kata.services.worktrees import _load_metadata
 
-                        os.write(out_fd, b"\r\n  \x1b[2mlaunching session...\x1b[0m")
+                        wt_info = next(
+                            (w for w in _load_metadata(Path(git_root)) if w.name == name),
+                            None,
+                        )
+                        if wt_info and context_mode != "fresh":
+                            _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
 
                         worktrees = _refresh()
                         for idx, wt in enumerate(worktrees):
@@ -1010,7 +1117,7 @@ def run_worktree_strip() -> None:
 
                     except WorktreeError as e:
                         console.clear()
-                        os.write(out_fd, f"\r\n  \x1b[31merror:\x1b[0m {e}\r\n".encode())
+                        console.print(f"  [red]error:[/red] {e}")
                         _read_key()
 
                 worktrees = _refresh()
