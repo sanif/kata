@@ -91,6 +91,52 @@ class TestRenderWorktreePanel:
 
         lines = render_worktree_panel([], selected_index=0, project_name="myproj", term_width=50)
         assert len(lines) > 0
+        full_text = "".join(line.plain for line in lines)
+        assert "No worktrees" in full_text
+
+    def test_current_worktree_marked(self):
+        from kata.cli.worktree_strip import render_worktree_panel
+
+        worktrees = [_make_main_status(), _make_wt_status("fix-auth")]
+        lines = render_worktree_panel(
+            worktrees,
+            selected_index=0,
+            project_name="myproj",
+            term_width=50,
+            current_worktree="fix-auth",
+        )
+        full_text = "".join(line.plain for line in lines)
+        assert "‹" in full_text
+
+    def test_branches_separator_shown(self):
+        from kata.cli.worktree_strip import render_worktree_panel
+
+        worktrees = [_make_main_status(), _make_wt_status("fix-auth")]
+        lines = render_worktree_panel(
+            worktrees, selected_index=0, project_name="myproj", term_width=50
+        )
+        full_text = "".join(line.plain for line in lines)
+        assert "branches" in full_text
+
+    def test_clean_shows_checkmark(self):
+        from kata.cli.worktree_strip import render_worktree_panel
+
+        worktrees = [_make_main_status(dirty=False)]
+        lines = render_worktree_panel(
+            worktrees, selected_index=0, project_name="myproj", term_width=50
+        )
+        full_text = "".join(line.plain for line in lines)
+        assert "✓" in full_text
+
+    def test_dirty_shows_plus_minus(self):
+        from kata.cli.worktree_strip import render_worktree_panel
+
+        worktrees = [_make_wt_status("fix", dirty=True, changed=5)]
+        lines = render_worktree_panel(
+            worktrees, selected_index=0, project_name="myproj", term_width=50
+        )
+        full_text = "".join(line.plain for line in lines)
+        assert "±5" in full_text
 
 
 class TestCalcPopupSize:
@@ -99,7 +145,7 @@ class TestCalcPopupSize:
 
         worktrees = [_make_main_status()]
         w, h = _calc_worktree_popup_size(worktrees, "x")
-        assert w >= 40
+        assert w >= 46
 
     def test_height_scales_with_worktrees(self):
         from kata.cli.worktree_strip import _calc_worktree_popup_size
@@ -109,3 +155,13 @@ class TestCalcPopupSize:
         _, h1 = _calc_worktree_popup_size(wt1, "x")
         _, h3 = _calc_worktree_popup_size(wt3, "x")
         assert h3 > h1
+
+    def test_branches_add_separator_height(self):
+        from kata.cli.worktree_strip import _calc_worktree_popup_size
+
+        wt_main_only = [_make_main_status()]
+        wt_with_branch = [_make_main_status(), _make_wt_status("a")]
+        _, h1 = _calc_worktree_popup_size(wt_main_only, "x")
+        _, h2 = _calc_worktree_popup_size(wt_with_branch, "x")
+        # With branch: +1 worktree row + 1 separator
+        assert h2 == h1 + 2

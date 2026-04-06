@@ -21,6 +21,13 @@ from rich.text import Text
 from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import WorktreeStatus
 
+# ── Constants ──────────────────────────────────────────────────────────
+
+_ICON_BRANCH = ""
+_ICON_WORKTREE = ""
+_MIN_WIDTH = 46
+
+
 # ── Rendering ────────────────────────────────────────────────────────────
 
 
@@ -36,18 +43,106 @@ def _content_row(content: Text, width: int) -> Text:
     return t
 
 
+def _render_worktree_row(
+    wt: WorktreeStatus,
+    selected: bool,
+    is_current: bool,
+    avail: int,
+) -> tuple[Text, Text | None]:
+    """Render a single worktree entry + optional summary line.
+
+    Returns (name_row, summary_row_or_None).
+    """
+    # ── Status dot ──
+    if wt.session_active:
+        dot, dot_color = "●", "green"
+    else:
+        dot, dot_color = "○", "bright_black"
+
+    # ── Display name ──
+    if wt.is_main:
+        display = wt.info.branch
+    else:
+        display = wt.info.name
+
+    # ── Git status badge ──
+    if wt.dirty:
+        if wt.changed_files > 0:
+            badge = f"±{wt.changed_files}"
+            badge_style = "yellow"
+        else:
+            badge = "±"
+            badge_style = "yellow"
+    else:
+        badge = "✓"
+        badge_style = "green"
+
+    # ── Build name row ──
+    entry = Text()
+
+    if selected:
+        inner = Text()
+        inner.append("┃ ", "cyan")
+        inner.append(dot, dot_color)
+        inner.append(f" {_ICON_BRANCH} ", "dim")
+        inner.append(display, "bold")
+        if is_current:
+            inner.append("  ‹", "dim cyan")
+
+        # Right-align badge
+        name_len = len(inner.plain)
+        badge_pad = max(1, avail - name_len - len(badge) - 1)
+        inner.append(" " * badge_pad)
+        inner.append(badge, badge_style)
+        inner.append(" ")
+        fill = max(0, avail - len(inner.plain))
+        inner.append(" " * fill)
+        inner.stylize("on grey23")
+        entry.append_text(inner)
+    else:
+        entry.append("  ")
+        entry.append(dot, dot_color)
+        entry.append(f" {_ICON_BRANCH} ", "dim")
+        if is_current:
+            entry.append(display, "dim italic")
+            entry.append("  ‹", "dim cyan")
+        else:
+            entry.append(display)
+
+        name_len = len(entry.plain)
+        badge_pad = max(1, avail - name_len - len(badge) - 1)
+        entry.append(" " * badge_pad)
+        entry.append(badge, f"dim {badge_style}" if not selected else badge_style)
+        entry.append(" ")
+
+    # ── Summary row ──
+    summary_row = None
+    if wt.session_summary:
+        summary = Text()
+        max_summary = avail - 8  # indent + quotes + pad
+        text = wt.session_summary
+        if len(text) > max_summary:
+            text = text[: max_summary - 1] + "…"
+        summary.append(f'      "{text}"', "dim italic")
+        summary_row = summary
+
+    return entry, summary_row
+
+
 def render_worktree_panel(
     worktrees: list[WorktreeStatus],
     selected_index: int,
     project_name: str,
     term_width: int = 50,
+    current_worktree: str | None = None,
 ) -> list[Text]:
     """Render the worktree list as a bordered panel."""
     w = term_width
     lines: list[Text] = []
+    avail = w - 4
 
     # ── Top border with title ──
-    title = f" {project_name} "
+    title = f" {_ICON_WORKTREE} {project_name} "
     side_len = (w - 2 - len(title)) // 2
     top = Text()
     top.append("╭", "dim")
@@ -57,68 +152,50 @@ def render_worktree_panel(
     top.append("╮", "dim")
     lines.append(top)
 
-    # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    if not worktrees:
+        lines.append(_content_row(Text(""), w))
+        empty = Text()
+        empty.append("  No worktrees", "dim")
+        lines.append(_content_row(empty, w))
+        lines.append(_content_row(Text(""), w))
+    else:
+        # ── Main worktree (always first, separated) ──
+        main_wt = worktrees[0] if worktrees and worktrees[0].is_main else None
+        other_wts = worktrees[1:] if main_wt else worktrees
 
-    # ── Worktree rows ──
-    for i, wt in enumerate(worktrees):
-        # Status dot
-        if wt.session_active:
-            dot, dot_color = "●", "green"
-        else:
-            dot, dot_color = "○", "bright_black"
+        if main_wt:
+            lines.append(_content_row(Text(""), w))
+            is_current = current_worktree is not None and (
+                current_worktree == main_wt.info.name or current_worktree == main_wt.info.branch
+            )
+            row, summary = _render_worktree_row(main_wt, selected_index == 0, is_current, avail)
+            lines.append(_content_row(row, w))
+            if summary:
+                lines.append(_content_row(summary, w))
 
-        # Dirty indicator
-        if wt.dirty:
-            if wt.changed_files > 0:
-                status_str = f"* {wt.changed_files} files"
-            else:
-                status_str = "* dirty"
-        else:
-            status_str = "✓ clean"
+        # ── Separator before branches ──
+        if other_wts:
+            sep_line = Text()
+            sep_label = " branches "
+            sep_side = (w - 2 - len(sep_label)) // 2
+            sep_line.append("├", "dim")
+            sep_line.append("─" * sep_side, "dim")
+            sep_line.append(sep_label, "dim")
+            sep_line.append("─" * (w - 2 - sep_side - len(sep_label)), "dim")
+            sep_line.append("┤", "dim")
+            lines.append(sep_line)
 
-        # Build name row
-        avail = w - 4
-        entry = Text()
-
-        display_name = wt.info.name
-        if wt.is_main:
-            display_name = f"main ({wt.info.branch})" if wt.info.branch != "main" else "main"
-
-        if i == selected_index:
-            inner = Text()
-            inner.append("┃ ", "cyan")
-            inner.append(dot, dot_color)
-            inner.append(f" {display_name}", "bold")
-            # Right-align status
-            name_len = len(inner.plain)
-            status_pad = max(1, avail - name_len - len(status_str))
-            inner.append(" " * status_pad)
-            inner.append(status_str, "dim")
-            fill = max(0, avail - len(inner.plain))
-            inner.append(" " * fill)
-            inner.stylize("on grey23")
-            entry.append_text(inner)
-        else:
-            entry.append("  ", "dim")
-            entry.append(dot, dot_color)
-            entry.append(f" {display_name}")
-            name_len = len(entry.plain)
-            status_pad = max(1, avail - name_len - len(status_str))
-            entry.append(" " * status_pad)
-            entry.append(status_str, "dim")
-
-        lines.append(_content_row(entry, w))
-
-        # Summary row (indented, dim)
-        if wt.session_summary:
-            summary = Text()
-            summary_text = wt.session_summary
-            max_summary = avail - 6  # indent + quotes
-            if len(summary_text) > max_summary:
-                summary_text = summary_text[: max_summary - 1] + "…"
-            summary.append(f'    "{summary_text}"', "dim italic")
-            lines.append(_content_row(summary, w))
+            for i, wt in enumerate(other_wts):
+                idx = i + (1 if main_wt else 0)
+                is_current = current_worktree is not None and (
+                    current_worktree == wt.info.name or current_worktree == wt.info.branch
+                )
+                row, summary = _render_worktree_row(wt, selected_index == idx, is_current, avail)
+                lines.append(_content_row(row, w))
+                if summary:
+                    lines.append(_content_row(summary, w))
+        elif not main_wt:
+            lines.append(_content_row(Text(""), w))
 
     # ── Spacer ──
     lines.append(_content_row(Text(""), w))
@@ -135,13 +212,12 @@ def render_worktree_panel(
     hint.append("  n", "cyan")
     hint.append(" new", "dim")
     hint.append("   ↵", "cyan")
-    hint.append(" switch", "dim")
+    hint.append(" go", "dim")
     hint.append("   d", "cyan")
     hint.append(" del", "dim")
-    hint.append("   q", "cyan")
+    hint.append("   esc", "cyan")
     hint.append(" quit", "dim")
     hint_len = len(hint.plain)
-    avail = w - 4
     left_pad = max(0, (avail - hint_len) // 2)
     centered_hint = Text()
     centered_hint.append(" " * left_pad)
@@ -163,20 +239,24 @@ def _calc_worktree_popup_size(
 ) -> tuple[int, int]:
     """Calculate popup dimensions."""
     max_name_len = 4  # "main"
+    has_branches = False
     for wt in worktrees:
         name_len = len(wt.info.name)
-        if wt.is_main and wt.info.branch != "main":
-            name_len = len(f"main ({wt.info.branch})")
+        if wt.is_main:
+            name_len = len(wt.info.branch)
+        else:
+            has_branches = True
         max_name_len = max(max_name_len, name_len)
 
-    # dot(1) + space(1) + name + pad + status(~10) + borders(4) + selection(2)
-    hint_w = 42  # hint text + border chrome
-    title_w = len(project_name) + 8
-    w = max(hint_w, title_w, max_name_len + 24)
+    # icon(2) + dot(1) + space(1) + branch_icon(2) + name + pad + badge(~4) + borders(4) + selection(2)
+    title_w = len(project_name) + 10
+    w = max(_MIN_WIDTH, title_w, max_name_len + 22)
 
-    # top(1) + spacer(1) + per-worktree(1 name + optional 1 summary) + spacer(1) + sep(1) + hint(1) + bottom(1)
+    # top(1) + spacer(1) + main(1-2) + sep?(1) + branches(N * 1-2) + spacer(1) + sep(1) + hint(1) + bottom(1)
     content_rows = sum(1 + (1 if wt.session_summary else 0) for wt in worktrees)
-    h = content_rows + 6
+    h = content_rows + 6  # borders + spacers + hint
+    if has_branches:
+        h += 1  # "branches" separator
     return w, h
 
 
@@ -219,7 +299,6 @@ def _read_line(console: Console, prompt: str) -> str | None:
     try:
         tty.setraw(fd)
         while True:
-            # Render current input
             console.print(f"\r{prompt}{''.join(buf)}\x1b[K", end="")
             ch = os.read(fd, 1)
             if ch == b"\x1b":
@@ -345,6 +424,31 @@ def _find_git_root(path: str) -> str | None:
     return None
 
 
+def _get_current_worktree_name(git_root: str) -> str | None:
+    """Detect which worktree we're currently in."""
+    from pathlib import Path
+
+    pane_path = _get_current_project_path()
+    if not pane_path:
+        return None
+
+    pane = Path(pane_path).resolve()
+    root = Path(git_root).resolve()
+
+    if pane == root or str(pane).startswith(str(root) + "/") and ".worktrees" not in str(pane):
+        return "main"
+
+    # Check if inside a worktree subdirectory
+    from kata.services.worktrees import _load_metadata
+
+    for wt in _load_metadata(root):
+        wt_abs = (root / wt.path).resolve()
+        if pane == wt_abs or str(pane).startswith(str(wt_abs) + "/"):
+            return wt.name
+
+    return None
+
+
 def open_worktree_popup() -> None:
     """Calculate content size and spawn a fitted tmux popup."""
     from pathlib import Path
@@ -414,6 +518,7 @@ def run_worktree_strip() -> None:
         return
 
     project_name = Path(git_root).name
+    current_wt = _get_current_worktree_name(git_root)
 
     def _refresh() -> list[WorktreeStatus]:
         wts = list_worktrees(git_root)
@@ -431,12 +536,13 @@ def run_worktree_strip() -> None:
     worktrees = _refresh()
     selected = 0
     confirmed = False
-    action = None  # "switch", "create", "delete"
 
     try:
         while True:
             console.clear()
-            panel = render_worktree_panel(worktrees, selected, project_name, console.width)
+            panel = render_worktree_panel(
+                worktrees, selected, project_name, console.width, current_wt
+            )
             for i, line in enumerate(panel):
                 if i < len(panel) - 1:
                     console.print(line)
@@ -452,16 +558,15 @@ def run_worktree_strip() -> None:
             elif key == "enter":
                 if worktrees:
                     confirmed = True
-                    action = "switch"
                     break
             elif key == "n":
-                # Create new worktree
+                # ── Create new worktree ──
                 console.clear()
-                name = _read_line(console, "  Branch name: ")
+                name = _read_line(console, f"  {_ICON_BRANCH} branch: ")
                 if name:
                     name = name.strip().replace(" ", "-")
                     console.print(
-                        "\n  Context: [cyan]f[/cyan]ork  [cyan]s[/cyan]ummary  [cyan]c[/cyan]lean"
+                        "\n  context  [cyan]f[/cyan]ork  [cyan]s[/cyan]ummary  [cyan]c[/cyan]lean"
                     )
                     mode_key = _read_key()
                     mode_map = {"f": "fork", "s": "summary", "c": "fresh"}
@@ -492,7 +597,7 @@ def run_worktree_strip() -> None:
 
                     except WorktreeError as e:
                         console.clear()
-                        console.print(f"  [red]Error:[/red] {e}")
+                        console.print(f"  [red]error:[/red] {e}")
                         _read_key()
 
                 worktrees = _refresh()
@@ -506,7 +611,7 @@ def run_worktree_strip() -> None:
                         selected = min(selected, len(worktrees) - 1) if worktrees else 0
                     except WorktreeError as e:
                         console.clear()
-                        console.print(f"  [red]Error:[/red] {e}")
+                        console.print(f"  [red]error:[/red] {e}")
                         _read_key()
 
             elif key == "D":
@@ -517,7 +622,7 @@ def run_worktree_strip() -> None:
                         selected = min(selected, len(worktrees) - 1) if worktrees else 0
                     except WorktreeError as e:
                         console.clear()
-                        console.print(f"  [red]Error:[/red] {e}")
+                        console.print(f"  [red]error:[/red] {e}")
                         _read_key()
 
             elif key in ("q", "escape"):
@@ -526,5 +631,5 @@ def run_worktree_strip() -> None:
     finally:
         console.clear()
 
-    if confirmed and action == "switch" and worktrees:
+    if confirmed and worktrees:
         _switch_to_worktree(git_root, project_name, worktrees[selected])
