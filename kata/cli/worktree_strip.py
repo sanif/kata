@@ -570,17 +570,48 @@ def _get_current_project_path() -> str | None:
 
 
 def _find_git_root(path: str) -> str | None:
-    """Find the git repository root for a path."""
+    """Find the main git repository root, resolving through worktrees.
+
+    Inside a worktree, `--show-toplevel` returns the worktree's path, not the
+    main repo. We use `--git-common-dir` to find the shared .git directory,
+    then resolve the main repo root from that.
+    """
+    from pathlib import Path
+
     try:
+        # Get the common .git dir (shared across all worktrees)
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--git-common-dir"],
             cwd=path,
             capture_output=True,
             text=True,
             timeout=SUBPROCESS_TIMEOUT,
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        if result.returncode != 0:
+            return None
+
+        git_common = result.stdout.strip()
+
+        # If it's just ".git", we're in the main repo — use --show-toplevel
+        if git_common == ".git":
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return None
+
+        # Otherwise git_common is an absolute or relative path like
+        # /main-repo/.git or ../../.git — the main repo is its parent
+        git_common_path = Path(git_common)
+        if not git_common_path.is_absolute():
+            git_common_path = (Path(path) / git_common_path).resolve()
+        return str(git_common_path.parent)
+
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     return None
