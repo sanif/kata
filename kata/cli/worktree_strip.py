@@ -564,7 +564,7 @@ def _render_loading_panel(
     return lines
 
 
-def _run_create_with_spinner(
+def _run_full_create_with_spinner(
     console: Console,
     project_name: str,
     git_root: str,
@@ -572,10 +572,12 @@ def _run_create_with_spinner(
     context_mode: str,
     source_id: str | None,
     create_fn,
+    refresh_fn,
 ) -> None:
-    """Run worktree creation with animated spinner in a bordered panel."""
+    """Run full worktree creation + seed + switch with animated spinner."""
     import threading
     import time
+    from pathlib import Path
 
     status_text = "creating worktree..."
     error_ref: list[Exception] = []
@@ -585,6 +587,7 @@ def _run_create_with_spinner(
     def _work():
         nonlocal status_text
         try:
+            # Step 1: create worktree
             status_text = "creating worktree..."
             create_fn(
                 git_root,
@@ -592,6 +595,32 @@ def _run_create_with_spinner(
                 context_mode=context_mode,
                 source_session_id=source_id,
             )
+
+            # Step 2: seed context
+            if context_mode != "fresh":
+                status_text = f"seeding context ({context_mode})..."
+                wt_abs = str(Path(git_root) / f".worktrees/{name}")
+                from kata.services.worktrees import _load_metadata
+
+                wt_info = next(
+                    (w for w in _load_metadata(Path(git_root)) if w.name == name),
+                    None,
+                )
+                if wt_info:
+                    _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
+
+            # Step 3: launch session
+            status_text = "launching session..."
+            worktrees = refresh_fn()
+            selected_wt = None
+            for wt in worktrees:
+                if wt.info.name == name:
+                    selected_wt = wt
+                    break
+
+            if selected_wt:
+                _switch_to_worktree(git_root, project_name, selected_wt, context_mode, source_id)
+
             status_text = "done"
         except Exception as e:
             error_ref.append(e)
@@ -1092,47 +1121,25 @@ def run_worktree_strip() -> None:
                     try:
                         source_id = None
                         if context_mode == "fork":
-                            source_id = get_current_session_id(git_root)
+                            # Use actual pane path first (user may be in a worktree),
+                            # fall back to git root
+                            source_id = get_current_session_id(pane_path) or get_current_session_id(
+                                git_root
+                            )
 
-                        _run_create_with_spinner(
-                            console,
-                            project_name,
-                            git_root,
-                            name,
-                            context_mode,
-                            source_id,
-                            create_worktree,
-                        )
-
-                        wt_info_path = f".worktrees/{name}"
-                        wt_abs = str(Path(git_root) / wt_info_path)
-
-                        # Load the created worktree info for context seeding
-                        from kata.services.worktrees import _load_metadata
-
-                        wt_info = next(
-                            (w for w in _load_metadata(Path(git_root)) if w.name == name),
-                            None,
-                        )
-                        if wt_info and context_mode != "fresh":
-                            _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
-
-                        worktrees = _refresh()
-                        for idx, wt in enumerate(worktrees):
-                            if wt.info.name == name:
-                                selected = idx
-                                break
-
-                        _switch_to_worktree(
-                            git_root,
-                            project_name,
-                            worktrees[selected],
-                            context_mode,
-                            source_id,
+                        _run_full_create_with_spinner(
+                            console=console,
+                            project_name=project_name,
+                            git_root=git_root,
+                            name=name,
+                            context_mode=context_mode,
+                            source_id=source_id,
+                            create_fn=create_worktree,
+                            refresh_fn=_refresh,
                         )
                         return
 
-                    except WorktreeError as e:
+                    except (WorktreeError, Exception) as e:
                         console.clear()
                         console.print(f"  [red]error:[/red] {e}")
                         _read_key()
