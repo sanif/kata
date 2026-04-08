@@ -12,8 +12,13 @@ _log = logging.getLogger("kata.worktree")
 
 
 def _encode_cwd(path: str) -> str:
-    """Encode a working directory path the way Claude Code does."""
-    return path.replace("/", "-")
+    """Encode a working directory path the way Claude Code does.
+
+    Claude replaces ALL non-alphanumeric characters with '-'.
+    """
+    import re
+
+    return re.sub(r"[^a-zA-Z0-9]", "-", path)
 
 
 def _find_latest_session(session_dir: Path) -> Path | None:

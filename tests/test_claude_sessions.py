@@ -18,6 +18,12 @@ class TestEncodeCwd:
         result = _encode_cwd("/")
         assert result == "-"
 
+    def test_encode_dots_and_underscores(self):
+        result = _encode_cwd("/path/.worktrees/my_feature")
+        assert result == "-path--worktrees-my-feature"
+        assert "." not in result
+        assert "_" not in result
+
 
 class TestFindLatestSession:
     def test_finds_most_recent_jsonl(self, tmp_path):

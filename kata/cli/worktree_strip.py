@@ -896,7 +896,7 @@ def _rewrite_claude_cmd(cmd: str, context_mode: str, source_session_id: str | No
     stripped = cmd.strip()
     if stripped == "claude" or stripped.startswith("claude "):
         if context_mode == "fork" and source_session_id:
-            rewritten = "claude --continue --fork-session"
+            rewritten = f"claude --resume {source_session_id} --fork-session"
             _log.info("_rewrite_claude_cmd: '%s' → '%s'", cmd, rewritten)
             return rewritten
         elif context_mode == "summary":
