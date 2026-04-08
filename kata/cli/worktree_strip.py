@@ -9,6 +9,7 @@ Architecture:
                → `kata worktree-strip --popup` (interactive UI inside popup)
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -20,6 +21,8 @@ from rich.text import Text
 
 from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import WorktreeStatus
+
+_log = logging.getLogger("kata.worktree")
 
 # ── Constants ──────────────────────────────────────────────────────────
 
@@ -588,6 +591,9 @@ def _run_full_create_with_spinner(
         nonlocal status_text
         try:
             # Step 1: create worktree
+            _log.info("=== CREATE WORKTREE START ===")
+            _log.info("name=%s context_mode=%s source_id=%s", name, context_mode, source_id)
+            _log.info("git_root=%s", git_root)
             status_text = "creating worktree..."
             create_fn(
                 git_root,
@@ -595,22 +601,27 @@ def _run_full_create_with_spinner(
                 context_mode=context_mode,
                 source_session_id=source_id,
             )
+            _log.info("worktree created successfully")
 
             # Step 2: seed context
             if context_mode != "fresh":
                 status_text = f"seeding context ({context_mode})..."
                 wt_abs = str(Path(git_root) / f".worktrees/{name}")
+                _log.info("seeding context: wt_abs=%s", wt_abs)
                 from kata.services.worktrees import _load_metadata
 
                 wt_info = next(
                     (w for w in _load_metadata(Path(git_root)) if w.name == name),
                     None,
                 )
+                _log.info("wt_info found: %s", wt_info is not None)
                 if wt_info:
                     _seed_context(git_root, wt_abs, wt_info, context_mode, source_id)
+                    _log.info("context seeded")
 
             # Step 3: launch session
             status_text = "launching session..."
+            _log.info("launching session...")
             worktrees = refresh_fn()
             selected_wt = None
             for wt in worktrees:
@@ -619,10 +630,15 @@ def _run_full_create_with_spinner(
                     break
 
             if selected_wt:
+                _log.info("switching to worktree: %s", selected_wt.info.name)
                 _switch_to_worktree(git_root, project_name, selected_wt, context_mode, source_id)
+            else:
+                _log.warning("worktree not found in refresh: %s", name)
 
             status_text = "done"
+            _log.info("=== CREATE WORKTREE DONE ===")
         except Exception as e:
+            _log.exception("CREATE WORKTREE FAILED: %s", e)
             error_ref.append(e)
         finally:
             done.set()
@@ -707,16 +723,17 @@ def _seed_context(
     from kata.utils.claude_sessions import get_session_summary
 
     branch = wt_info.branch if hasattr(wt_info, "branch") else "unknown"
+    _log.info("_seed_context: mode=%s source_id=%s", context_mode, source_session_id)
+    _log.info("_seed_context: project_path=%s wt_path=%s", project_path, wt_path)
 
     if context_mode == "fork" and source_session_id:
-        # Copy the parent's session JSONL into the worktree's Claude project dir
-        # so `claude --resume <id> --fork-session` can find it
         from kata.utils.claude_sessions import _encode_cwd
 
         claude_dir = Path.home() / ".claude"
         src_encoded = _encode_cwd(project_path)
         src_session_dir = claude_dir / "projects" / src_encoded
         src_session = src_session_dir / f"{source_session_id}.jsonl"
+        _log.info("fork: src_session=%s exists=%s", src_session, src_session.exists())
 
         if src_session.exists():
             wt_resolved = str(Path(wt_path).resolve())
@@ -724,13 +741,17 @@ def _seed_context(
             dst_session_dir = claude_dir / "projects" / dst_encoded
             dst_session_dir.mkdir(parents=True, exist_ok=True)
             dst_session = dst_session_dir / f"{source_session_id}.jsonl"
+            _log.info("fork: dst_session=%s", dst_session)
 
             try:
                 import shutil
 
                 shutil.copy2(str(src_session), str(dst_session))
-            except OSError:
-                pass  # Non-fatal — --fork-session will fail gracefully
+                _log.info("fork: JSONL copied successfully")
+            except OSError as e:
+                _log.warning("fork: copy failed: %s", e)
+        else:
+            _log.warning("fork: source session does not exist!")
 
         # Write orientation context
         wt_claude_dir = Path(wt_path) / ".claude"
@@ -795,6 +816,14 @@ def _launch_worktree_session(
     from kata.services.sessions import launch_adhoc_session
 
     config_path = get_project_config_path(wt_abs)
+    _log.info(
+        "_launch_worktree_session: wt_abs=%s session=%s mode=%s src_id=%s",
+        wt_abs,
+        session_name,
+        context_mode,
+        source_session_id,
+    )
+    _log.info("  config_path=%s exists=%s", config_path, config_path.exists())
     if config_path.exists():
         try:
             config = yaml.safe_load(config_path.read_text())
@@ -816,11 +845,18 @@ def _launch_worktree_session(
                                 for cmd in cmds
                             ]
 
+            _log.info("  final config windows:")
+            for wi, window in enumerate(config.get("windows", [])):
+                for pi, pane in enumerate(window.get("panes", [])):
+                    if isinstance(pane, dict):
+                        _log.info("    w%d/p%d: %s", wi, pi, pane.get("shell_command"))
+
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".yaml", prefix="kata-wt-", delete=False
             ) as f:
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
                 temp_path = f.name
+            _log.info("  temp config written to: %s", temp_path)
 
             from pathlib import Path
 
@@ -830,12 +866,18 @@ def _launch_worktree_session(
                     capture_output=True,
                     text=True,
                 )
+                _log.info(
+                    "  tmuxp returncode=%d stderr=%s",
+                    result.returncode,
+                    result.stderr[:200] if result.stderr else "",
+                )
                 if result.returncode != 0:
                     return launch_adhoc_session(wt_abs, session_name=session_name)
                 return session_name
             finally:
                 Path(temp_path).unlink(missing_ok=True)
-        except Exception:
+        except Exception as e:
+            _log.exception("  launch failed: %s", e)
             return launch_adhoc_session(wt_abs, session_name=session_name)
     else:
         return launch_adhoc_session(wt_abs, session_name=session_name)
@@ -854,9 +896,19 @@ def _rewrite_claude_cmd(cmd: str, context_mode: str, source_session_id: str | No
     stripped = cmd.strip()
     if stripped == "claude" or stripped.startswith("claude "):
         if context_mode == "fork" and source_session_id:
-            return "claude --continue --fork-session"
+            rewritten = "claude --continue --fork-session"
+            _log.info("_rewrite_claude_cmd: '%s' → '%s'", cmd, rewritten)
+            return rewritten
         elif context_mode == "summary":
-            return "claude --continue"
+            rewritten = "claude --continue"
+            _log.info("_rewrite_claude_cmd: '%s' → '%s'", cmd, rewritten)
+            return rewritten
+        else:
+            _log.info(
+                "_rewrite_claude_cmd: no rewrite (mode=%s, src_id=%s)",
+                context_mode,
+                source_session_id,
+            )
     return cmd
 
 
@@ -1037,6 +1089,15 @@ def run_worktree_strip() -> None:
     """Run the interactive worktree manager inside the popup."""
     from pathlib import Path
 
+    # Set up file logging for debugging
+    log_path = Path.home() / ".cache" / "kata" / "worktree.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(str(log_path), mode="a")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _log.addHandler(handler)
+    _log.setLevel(logging.DEBUG)
+    _log.info("========== WORKTREE STRIP STARTED ==========")
+
     from kata.services.sessions import get_all_session_statuses
     from kata.services.worktrees import (
         WorktreeError,
@@ -1049,11 +1110,13 @@ def run_worktree_strip() -> None:
     console = Console()
 
     pane_path = _get_current_project_path()
+    _log.info("pane_path=%s", pane_path)
     if not pane_path:
         console.print("[dim]Not in a project.[/dim]")
         return
 
     git_root = _find_git_root(pane_path)
+    _log.info("git_root=%s", git_root)
     if not git_root:
         console.print("[dim]Not a git repository.[/dim]")
         return
