@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
 SUMMARY_MAX_LEN = 72
-
-_log = logging.getLogger("kata.worktree")
 
 
 def _encode_cwd(path: str) -> str:
@@ -102,7 +99,6 @@ def get_current_session_id(
         claude_dir = Path.home() / ".claude"
 
     resolved = str(Path(worktree_path).resolve())
-    _log.info("get_current_session_id called with path=%s resolved=%s", worktree_path, resolved)
 
     # Try to find an active session process for this cwd
     sessions_dir = claude_dir / "sessions"
@@ -112,37 +108,22 @@ def get_current_session_id(
                 data = json.loads(pid_file.read_text())
                 session_cwd = data.get("cwd", "")
                 resolved_cwd = str(Path(session_cwd).resolve())
-                _log.debug(
-                    "  checking pid=%s cwd=%s resolved=%s match=%s",
-                    pid_file.stem,
-                    session_cwd,
-                    resolved_cwd,
-                    resolved_cwd == resolved,
-                )
                 if resolved_cwd == resolved:
                     session_id = data.get("sessionId")
-                    _log.info("  FOUND active session: %s", session_id)
                     if session_id:
                         return session_id
-            except (json.JSONDecodeError, OSError) as e:
-                _log.debug("  error reading %s: %s", pid_file.name, e)
+            except (json.JSONDecodeError, OSError):
                 continue
-    else:
-        _log.info("  sessions dir does not exist: %s", sessions_dir)
 
     # Fall back to most recently modified JSONL
     encoded = _encode_cwd(worktree_path)
     session_dir = claude_dir / "projects" / encoded
-    _log.info("  fallback: looking in %s", session_dir)
 
     if not session_dir.exists():
-        _log.info("  fallback dir does not exist, returning None")
         return None
 
     latest = _find_latest_session(session_dir)
     if latest is None:
-        _log.info("  no JSONL files found, returning None")
         return None
-    _log.info("  fallback found: %s", latest.stem)
 
     return latest.stem

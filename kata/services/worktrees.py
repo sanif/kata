@@ -14,6 +14,8 @@ from kata.utils.git import get_branch_name, get_git_status
 WORKTREES_DIR = ".worktrees"
 METADATA_FILE = ".kata-worktrees.json"
 
+_SHARED_SYMLINKS = [".env", "node_modules", ".venv"]
+
 
 class WorktreeError(Exception):
     """Raised when a worktree operation fails."""
@@ -70,8 +72,7 @@ def _ensure_gitignore(project_path: Path) -> None:
 
 
 def _symlink_shared_files(project_path: Path, wt_path: Path) -> None:
-    shared = [".env", "node_modules", ".venv"]
-    for name in shared:
+    for name in _SHARED_SYMLINKS:
         source = project_path / name
         target = wt_path / name
         if source.exists() and not target.exists():
@@ -173,7 +174,7 @@ def _cleanup_worktree_files(wt_path: Path) -> None:
         shutil.rmtree(claude_dir, ignore_errors=True)
 
     # Remove symlinks we created
-    for name in [".kata.yaml", ".env", "node_modules", ".venv"]:
+    for name in [*_SHARED_SYMLINKS, ".kata.yaml"]:
         target = wt_path / name
         if target.is_symlink():
             target.unlink()

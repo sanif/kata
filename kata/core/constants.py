@@ -19,3 +19,6 @@ SESSION_READY_MAX_RETRIES = int(SESSION_READY_TIMEOUT / SESSION_READY_POLL_INTER
 
 # --- Unique session name generation ---
 SESSION_NAME_MAX_SUFFIX = 100
+
+# --- Worktree management ---
+WORKTREE_SPINNER_INTERVAL = 0.08
