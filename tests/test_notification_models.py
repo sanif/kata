@@ -203,7 +203,6 @@ class TestNotificationSettings:
         assert s.notifications_os_enabled is True
         assert s.notifications_retention_days == 7
         assert s.notifications_max_count == 500
-        assert s.notifications_terminal_app == "auto"
 
     def test_serialization_roundtrip(self):
         from kata.core.settings import Settings

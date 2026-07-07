@@ -11,17 +11,8 @@ import logging
 from pathlib import Path
 
 from kata.core.settings import get_settings
-from kata.services.notifications import notify
 from kata.services.notifications.dispatch.analyzer import analyze_transcript
-from kata.services.notifications.dispatch.dedup import acquire_lock, is_duplicate_early
-from kata.services.notifications.dispatch.macos import TYPE_TITLES, get_git_branch
-from kata.services.notifications.dispatch.state import (
-    is_suppressed,
-    load_session_state,
-    update_session_state,
-)
-from kata.services.notifications.dispatch.summary import generate_summary
-from kata.services.notifications.hooks.common import resolve_session_name
+from kata.services.notifications.hooks.common import run_hook_pipeline
 from kata.services.notifications.models import NotificationSource, NotificationType
 
 logger = logging.getLogger(__name__)
@@ -54,11 +45,7 @@ def handle_hook_event(event_type: str, stdin_data: str) -> None:
     cwd = context.get("cwd", "")
     last_message = context.get("prompt_response", "")
 
-    # 1. Dedup Phase 1 — early exit if recent lock
-    if is_duplicate_early(session_id, event_type):
-        return
-
-    # 2. Classify
+    # Classify (deferred so transcript analysis is skipped for dedup'd events).
     if event_type == "before-tool":
         tool_name = context.get("tool_name", "")
         # Map Gemini tool names
@@ -66,51 +53,31 @@ def handle_hook_event(event_type: str, stdin_data: str) -> None:
             notification_type = NotificationType.QUESTION
         else:
             return  # Not a tool we care about for pre-tool notifications
+
+        def classify() -> NotificationType:
+            return notification_type
     elif event_type == "notification":
         # System-level notifications from Gemini CLI
-        notification_type = NotificationType.QUESTION
+        last_message = str(context.get("message", "") or last_message)
+
+        def classify() -> NotificationType:
+            return NotificationType.QUESTION
     else:
         # after-agent / session-end — full transcript analysis
-        notification_type = analyze_transcript(transcript_path, context)
+        def classify() -> NotificationType:
+            return analyze_transcript(transcript_path, context)
 
-    # 3. Dedup Phase 2 — atomic lock
-    if not acquire_lock(session_id, event_type):
-        return
-
-    # 4. Suppression check
-    state = load_session_state(session_id)
-    if is_suppressed(
-        notification_type,
-        state,
-        suppress_dup=settings.notifications_suppress_duplicate_seconds,
-        suppress_q_task=settings.notifications_suppress_question_after_task_seconds,
-        suppress_q_any=settings.notifications_suppress_question_after_any_seconds,
-    ):
-        return
-
-    # 5. Build notification
-    summary = generate_summary(last_message) if last_message else ""
-    branch = get_git_branch(cwd)
-    session_name = resolve_session_name(cwd)
-    title = TYPE_TITLES.get(notification_type, "Gemini CLI Event")
-
-    # 6. Dispatch
-    notify(
-        type=notification_type,
+    run_hook_pipeline(
         source=NotificationSource.GEMINI,
-        title=title,
-        body=summary,
-        session_name=session_name,
-        metadata={
-            "session_id": session_id,
-            "cwd": cwd,
-            "transcript_path": transcript_path,
-            "branch": branch,
-        },
+        event_type=event_type,
+        session_id=session_id,
+        classify=classify,
+        settings=settings,
+        cwd=cwd,
+        transcript_path=transcript_path,
+        last_message=last_message,
+        default_title="Gemini CLI Event",
     )
-
-    # 7. Update session state
-    update_session_state(session_id, notification_type)
 
 
 def setup_hooks() -> None:

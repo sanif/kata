@@ -12,22 +12,16 @@ import re
 from pathlib import Path
 
 from kata.core.settings import get_settings
-from kata.services.notifications import notify
-from kata.services.notifications.dispatch.analyzer import analyze_transcript
-from kata.services.notifications.dispatch.dedup import acquire_lock, is_duplicate_early
-from kata.services.notifications.dispatch.macos import TYPE_TITLES, get_git_branch
-from kata.services.notifications.dispatch.state import (
-    is_suppressed,
-    load_session_state,
-    update_session_state,
-)
-from kata.services.notifications.dispatch.summary import generate_summary
-from kata.services.notifications.hooks.common import resolve_session_name
-from kata.services.notifications.models import NotificationSource
+from kata.services.notifications.hooks.common import run_hook_pipeline
+from kata.services.notifications.models import NotificationSource, NotificationType
 
 logger = logging.getLogger(__name__)
 
 _NOTIFY_LINE = 'notify = ["kata", "notify-hook", "codex"]'
+# Matches kata's own top-level notify assignment (single-line array form we write).
+_KATA_NOTIFY_RE = re.compile(
+    r'notify\s*=\s*\[\s*"kata"\s*,\s*"notify-hook"\s*,\s*"codex"\s*,?\s*\]'
+)
 
 
 def handle_hook_event(stdin_data: str) -> None:
@@ -68,63 +62,66 @@ def handle_hook_event(stdin_data: str) -> None:
         or ""
     )
 
-    if is_duplicate_early(session_id, event_type):
-        return
+    # Codex only fires on agent-turn-complete and never provides a transcript we
+    # can classify from, so the type is always TASK_COMPLETE — classify directly
+    # instead of running the (no-op) transcript analyzer.
+    def classify() -> NotificationType:
+        return NotificationType.TASK_COMPLETE
 
-    notification_type = analyze_transcript(transcript_path, context)
-
-    if not acquire_lock(session_id, event_type):
-        return
-
-    state = load_session_state(session_id)
-    if is_suppressed(
-        notification_type,
-        state,
-        suppress_dup=settings.notifications_suppress_duplicate_seconds,
-        suppress_q_task=settings.notifications_suppress_question_after_task_seconds,
-        suppress_q_any=settings.notifications_suppress_question_after_any_seconds,
-    ):
-        return
-
-    summary = generate_summary(last_message) if last_message else ""
-    branch = get_git_branch(cwd)
-    session_name = resolve_session_name(cwd)
-    title = TYPE_TITLES.get(notification_type, "Codex Event")
-
-    notify(
-        type=notification_type,
+    run_hook_pipeline(
         source=NotificationSource.CODEX,
-        title=title,
-        body=summary,
-        session_name=session_name,
-        metadata={
-            "event_type": event_type,
-            "session_id": session_id,
-            "cwd": cwd,
-            "transcript_path": transcript_path,
-            "branch": branch,
-        },
+        event_type=event_type,
+        session_id=session_id,
+        classify=classify,
+        settings=settings,
+        cwd=cwd,
+        transcript_path=transcript_path,
+        last_message=last_message,
+        extra_metadata={"event_type": event_type},
+        default_title="Codex Event",
     )
 
-    update_session_state(session_id, notification_type)
 
+def setup_hooks() -> str:
+    """Set up Codex notify command in ~/.codex/config.toml.
 
-def setup_hooks() -> None:
-    """Set up Codex notify command in ~/.codex/config.toml."""
+    Codex reads a *top-level* ``notify`` key, so the assignment must appear
+    before any ``[table]`` header. Behavior:
+
+    * If kata's notify is already installed at top level -> ``"already_installed"``.
+    * If a *different* top-level ``notify`` command already exists, it is
+      preserved (never clobbered) and kata is NOT installed ->
+      ``"existing_notify_preserved"`` (the setup UI should surface this so the
+      user can merge manually).
+    * Otherwise kata's notify line is prepended at the very top of the file ->
+      ``"installed"``.
+    """
     config_path = Path.home() / ".codex" / "config.toml"
     text = config_path.read_text() if config_path.exists() else ""
 
-    if "kata notify-hook codex" in text:
-        return
+    lines = text.splitlines()
 
-    # Replace an existing top-level notify line/array if present.
-    notify_re = re.compile(r"(?ms)^notify\s*=\s*\[(?:[^\]]|\n)*\]")
-    if notify_re.search(text):
-        text = notify_re.sub(_NOTIFY_LINE, text, count=1)
-    else:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        text += _NOTIFY_LINE + "\n"
+    # The top-level region ends at the first table header (``[...]``).
+    top_end = len(lines)
+    for i, line in enumerate(lines):
+        if re.match(r"\s*\[", line):
+            top_end = i
+            break
+    top_text = "\n".join(lines[:top_end])
+
+    # Already correctly installed at top level?
+    if _KATA_NOTIFY_RE.search(top_text):
+        return "already_installed"
+
+    # A different top-level notify assignment? Preserve it, do not clobber.
+    for i in range(top_end):
+        if re.match(r"\s*notify\s*=", lines[i]):
+            logger.debug("Codex config has a user-owned top-level notify; preserving it")
+            return "existing_notify_preserved"
+
+    # Prepend kata's notify at the very top (before any table header).
+    new_text = _NOTIFY_LINE + "\n" + text if text else _NOTIFY_LINE + "\n"
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(text)
+    config_path.write_text(new_text)
+    return "installed"

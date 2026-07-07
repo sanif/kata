@@ -8,13 +8,19 @@ import logging
 from typing import Any
 
 from kata.core.config import NOTIFYD_SOCKET
+from kata.core.constants import NOTIFY_CLIENT_TIMEOUT, NOTIFY_CONNECT_TIMEOUT
 from kata.services.notifications.models import Notification
 
 logger = logging.getLogger(__name__)
 
 
 class NotificationClient:
-    """Async client for the notification daemon Unix socket."""
+    """Async client for the notification daemon Unix socket.
+
+    Every network operation is bounded by a timeout so a wedged daemon can
+    never block a hook (which would stall an entire agent turn). On timeout the
+    caller sees an exception / False and the SQLite fallback path runs.
+    """
 
     def __init__(self) -> None:
         """Initialize the client."""
@@ -22,27 +28,35 @@ class NotificationClient:
         self._writer: asyncio.StreamWriter | None = None
 
     async def connect(self) -> None:
-        """Connect to the daemon socket."""
-        self._reader, self._writer = await asyncio.open_unix_connection(str(NOTIFYD_SOCKET))
+        """Connect to the daemon socket (bounded by NOTIFY_CONNECT_TIMEOUT)."""
+        self._reader, self._writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(str(NOTIFYD_SOCKET)),
+            timeout=NOTIFY_CONNECT_TIMEOUT,
+        )
 
     async def close(self) -> None:
         """Close the connection."""
         if self._writer:
             self._writer.close()
-            await self._writer.wait_closed()
+            try:
+                await asyncio.wait_for(self._writer.wait_closed(), timeout=NOTIFY_CLIENT_TIMEOUT)
+            except (asyncio.TimeoutError, OSError):
+                pass
             self._writer = None
             self._reader = None
 
     async def _send(self, msg: dict[str, Any]) -> dict[str, Any]:
-        """Send a message and read the response."""
+        """Send a message and read the response (bounded by NOTIFY_CLIENT_TIMEOUT)."""
         if not self._writer or not self._reader:
             raise ConnectionError("Not connected to daemon")
 
         data = json.dumps(msg) + "\n"
         self._writer.write(data.encode())
-        await self._writer.drain()
+        await asyncio.wait_for(self._writer.drain(), timeout=NOTIFY_CLIENT_TIMEOUT)
 
-        response_data = await self._reader.readline()
+        response_data = await asyncio.wait_for(
+            self._reader.readline(), timeout=NOTIFY_CLIENT_TIMEOUT
+        )
         return json.loads(response_data.decode().strip())
 
     async def send_notification(self, notification: Notification) -> dict[str, Any]:
@@ -96,25 +110,6 @@ class NotificationClient:
             return result.get("status") == "pong"
         except Exception:
             return False
-
-    async def subscribe(self) -> None:
-        """Subscribe to real-time notification events.
-
-        After calling this, use `read_event()` to receive pushed events.
-        """
-        await self._send({"action": "subscribe"})
-
-    async def read_event(self) -> dict[str, Any] | None:
-        """Read the next pushed event from a subscription."""
-        if not self._reader:
-            return None
-        try:
-            data = await self._reader.readline()
-            if not data:
-                return None
-            return json.loads(data.decode().strip())
-        except Exception:
-            return None
 
 
 def send_notification_sync(notification: Notification) -> bool:

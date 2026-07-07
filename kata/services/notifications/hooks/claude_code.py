@@ -11,17 +11,8 @@ import logging
 from pathlib import Path
 
 from kata.core.settings import get_settings
-from kata.services.notifications import notify
 from kata.services.notifications.dispatch.analyzer import analyze_transcript
-from kata.services.notifications.dispatch.dedup import acquire_lock, is_duplicate_early
-from kata.services.notifications.dispatch.macos import TYPE_TITLES, get_git_branch
-from kata.services.notifications.dispatch.state import (
-    is_suppressed,
-    load_session_state,
-    update_session_state,
-)
-from kata.services.notifications.dispatch.summary import generate_summary
-from kata.services.notifications.hooks.common import resolve_session_name
+from kata.services.notifications.hooks.common import run_hook_pipeline
 from kata.services.notifications.models import NotificationSource, NotificationType
 
 logger = logging.getLogger(__name__)
@@ -58,11 +49,8 @@ def handle_hook_event(event_type: str, stdin_data: str) -> None:
     if event_type == "subagent-stop" and not settings.notifications_subagent_stop:
         return
 
-    # 1. Dedup Phase 1 — early exit if recent lock
-    if is_duplicate_early(session_id, event_type):
-        return
-
-    # 2. Classify
+    # Classify (deferred into a callable so transcript analysis is skipped for
+    # deduplicated events).
     if event_type == "pre-tool-use":
         tool_name = context.get("tool_name", "")
         if tool_name == "ExitPlanMode":
@@ -71,50 +59,32 @@ def handle_hook_event(event_type: str, stdin_data: str) -> None:
             notification_type = NotificationType.QUESTION
         else:
             return  # Not a tool we care about
+
+        def classify() -> NotificationType:
+            return notification_type
     elif event_type == "notification":
-        notification_type = NotificationType.QUESTION
+        # Permission-request / question payloads carry the human-readable prompt
+        # in ``message``; use it as the body so it isn't an empty banner.
+        last_message = str(context.get("message", "") or last_message)
+
+        def classify() -> NotificationType:
+            return NotificationType.QUESTION
     else:
         # stop / subagent-stop — full transcript analysis
-        notification_type = analyze_transcript(transcript_path, context)
+        def classify() -> NotificationType:
+            return analyze_transcript(transcript_path, context)
 
-    # 3. Dedup Phase 2 — atomic lock
-    if not acquire_lock(session_id, event_type):
-        return
-
-    # 4. Suppression check
-    state = load_session_state(session_id)
-    if is_suppressed(
-        notification_type,
-        state,
-        suppress_dup=settings.notifications_suppress_duplicate_seconds,
-        suppress_q_task=settings.notifications_suppress_question_after_task_seconds,
-        suppress_q_any=settings.notifications_suppress_question_after_any_seconds,
-    ):
-        return
-
-    # 5. Build notification
-    summary = generate_summary(last_message) if last_message else ""
-    branch = get_git_branch(cwd)
-    session_name = resolve_session_name(cwd)
-    title = TYPE_TITLES.get(notification_type, "Claude Code Event")
-
-    # 6. Dispatch
-    notify(
-        type=notification_type,
+    run_hook_pipeline(
         source=NotificationSource.CLAUDE_CODE,
-        title=title,
-        body=summary,
-        session_name=session_name,
-        metadata={
-            "session_id": session_id,
-            "cwd": cwd,
-            "transcript_path": transcript_path,
-            "branch": branch,
-        },
+        event_type=event_type,
+        session_id=session_id,
+        classify=classify,
+        settings=settings,
+        cwd=cwd,
+        transcript_path=transcript_path,
+        last_message=last_message,
+        default_title="Claude Code Event",
     )
-
-    # 7. Update session state
-    update_session_state(session_id, notification_type)
 
 
 def setup_hooks() -> None:
@@ -127,12 +97,18 @@ def setup_hooks() -> None:
     if settings_path.exists():
         try:
             existing = json.loads(settings_path.read_text())
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, OSError):
             existing = {}
     else:
         existing = {}
 
+    if not isinstance(existing, dict):
+        existing = {}
+
     hooks = existing.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        hooks = {}
+        existing["hooks"] = hooks
 
     # Define hook configurations
     hook_configs = {
@@ -156,12 +132,22 @@ def setup_hooks() -> None:
 
     for event, config in hook_configs.items():
         event_hooks = hooks.setdefault(event, [])
+        if not isinstance(event_hooks, list):
+            event_hooks = []
+            hooks[event] = event_hooks
         already_exists = any(
-            any(h.get("command", "").startswith("kata notify") for h in entry.get("hooks", []))
+            isinstance(entry, dict)
+            and any(
+                isinstance(h, dict) and h.get("command", "").startswith("kata notify")
+                for h in entry.get("hooks", [])
+            )
             for entry in event_hooks
         )
         if not already_exists:
             event_hooks.append(config)
 
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(existing, indent=2) + "\n")
+    try:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(existing, indent=2) + "\n")
+    except OSError as e:
+        logger.error(f"Failed to setup Claude Code hooks: {e}")

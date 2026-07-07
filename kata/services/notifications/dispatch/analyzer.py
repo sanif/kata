@@ -50,6 +50,29 @@ PASSIVE_TOOLS = frozenset(
 
 _SESSION_LIMIT_PATTERN = re.compile(r"session.?limit", re.IGNORECASE)
 _MAX_ASSISTANT_MESSAGES = 15
+# Only the tail of the transcript matters (last 50 JSONL lines). Reading the
+# whole file is wasteful for multi-MB transcripts, so cap the read at 256 KiB
+# from the end — comfortably more than 50 lines of hook events.
+_TRANSCRIPT_TAIL_BYTES = 256 * 1024
+
+
+def _read_transcript_tail(path: Path, max_bytes: int = _TRANSCRIPT_TAIL_BYTES) -> str:
+    """Read at most ``max_bytes`` from the end of a file, decoded as UTF-8.
+
+    Avoids loading multi-MB transcripts entirely into memory.
+    """
+    with path.open("rb") as f:
+        f.seek(0, 2)  # end
+        size = f.tell()
+        start = max(0, size - max_bytes)
+        f.seek(start)
+        data = f.read()
+    # If we started mid-file, drop the (likely partial) first line.
+    if start > 0:
+        nl = data.find(b"\n")
+        if nl != -1:
+            data = data[nl + 1 :]
+    return data.decode("utf-8", errors="replace")
 
 
 def parse_transcript_window(transcript_path: str) -> tuple[set[str], list[str]]:
@@ -64,7 +87,7 @@ def parse_transcript_window(transcript_path: str) -> tuple[set[str], list[str]]:
     last_user_idx = -1
 
     try:
-        text = path.read_text()
+        text = _read_transcript_tail(path)
         lines = text.strip().split("\n")
         for line in lines[-50:]:
             if not line.strip():
@@ -146,7 +169,12 @@ def analyze_transcript(
     transcript_path: str,
     hook_input: dict | None = None,
 ) -> NotificationType:
-    """Full analysis: parse transcript + classify."""
-    has_error = bool(hook_input and hook_input.get("error"))
+    """Full analysis: parse transcript + classify.
+
+    ``hook_input`` is accepted for call-site compatibility but no Claude Code,
+    Gemini, or Codex hook payload carries an ``error`` field, so there is no
+    reachable ERROR branch here (``classify_from_tools_and_text`` still exposes
+    ``has_error`` for direct callers/tests).
+    """
     tools, messages = parse_transcript_window(transcript_path)
-    return classify_from_tools_and_text(tools, messages, has_error=has_error)
+    return classify_from_tools_and_text(tools, messages, has_error=False)

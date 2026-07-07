@@ -12,6 +12,15 @@ SUBPROCESS_TIMEOUT_SHORT = 2
 DB_CONNECT_TIMEOUT = 15
 DB_BUSY_TIMEOUT_MS = 10000
 
+# --- Notification daemon client (seconds) ---
+# Never let a hook block on a wedged daemon: connect + each request/response
+# is bounded by these so send_notification_sync falls back to SQLite fast.
+NOTIFY_CONNECT_TIMEOUT = 1.0
+NOTIFY_CLIENT_TIMEOUT = 2.0
+
+# --- Notification daemon store pruning ---
+NOTIFYD_PRUNE_INTERVAL_SECONDS = 3600.0
+
 # --- Session readiness polling ---
 SESSION_READY_TIMEOUT = 2.0
 SESSION_READY_POLL_INTERVAL = 0.1

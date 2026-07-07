@@ -22,6 +22,11 @@ from kata.services.notifications.store import NotificationStore, get_notificatio
 
 logger = logging.getLogger(__name__)
 
+# Prune at most once per process on the direct-SQLite fallback path, so that
+# retention settings still take effect for hook-only users who never run the TUI
+# or daemon (each hook invocation is a fresh, short-lived process).
+_pruned_this_process = False
+
 __all__ = [
     "notify",
     "Notification",
@@ -75,14 +80,23 @@ def notify(
     if not sent:
         # Fallback: write directly to store with a fresh connection
         # to avoid locking issues with long-lived processes (e.g., TUI)
+        stored = False
         try:
             store = NotificationStore()
             try:
                 store.add(notification)
+                stored = True
+                _prune_fallback_once(store, settings)
             finally:
                 store.close()
         except Exception:
             logger.debug("Failed to store notification", exc_info=True)
+
+        if not stored:
+            # BOTH the daemon send and the store write failed: this notification
+            # is fully lost. Record one diagnostic line so total loss isn't
+            # completely silent (everything else stays at debug level).
+            _log_notification_loss(notification)
 
     # Dispatch OS-level notification (non-blocking, best-effort)
     try:
@@ -94,3 +108,39 @@ def notify(
             send_macos_notification(notification)
     except Exception:
         logger.debug("Failed to send OS notification", exc_info=True)
+
+
+def _prune_fallback_once(store: NotificationStore, settings: Any) -> None:
+    """Prune the store once per process on the direct-SQLite fallback path."""
+    global _pruned_this_process
+    if _pruned_this_process:
+        return
+    _pruned_this_process = True
+    try:
+        store.prune(
+            max_age_days=settings.notifications_retention_days,
+            max_count=settings.notifications_max_count,
+        )
+    except Exception:
+        logger.debug("Fallback prune failed", exc_info=True)
+
+
+def _log_notification_loss(notification: Notification) -> None:
+    """Best-effort single-line record of a fully-lost notification."""
+    try:
+        from datetime import datetime
+
+        from kata.core.config import KATA_CONFIG_DIR, ensure_config_dirs
+
+        ensure_config_dirs()
+        log_path = KATA_CONFIG_DIR / "notifications-error.log"
+        line = (
+            f"{datetime.now().isoformat()} LOST "
+            f"{notification.source.value}/{notification.type.value} "
+            f"session={notification.session_name!r} title={notification.title!r} "
+            "(daemon send AND store write both failed)\n"
+        )
+        with open(log_path, "a") as f:
+            f.write(line)
+    except Exception:
+        logger.debug("Failed to write notification-loss log", exc_info=True)

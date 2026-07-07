@@ -3,109 +3,108 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from kata.services.notifications.hooks.codex import handle_hook_event
-from kata.services.notifications.models import NotificationType
+from kata.services.notifications.hooks.codex import handle_hook_event, setup_hooks
+from kata.services.notifications.models import NotificationSource, NotificationType
 
 
 class TestHandleCodexHookEvent:
-    """Tests for the Codex dispatch pipeline."""
+    """The Codex module parses the payload, then delegates to the pipeline."""
 
-    @patch("kata.services.notifications.hooks.codex.notify")
+    @patch("kata.services.notifications.hooks.codex.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.codex.get_settings")
-    def test_disabled_notifications_returns_early(self, mock_settings, mock_notify):
+    def test_disabled_notifications_returns_early(self, mock_settings, mock_pipeline):
         mock_settings.return_value = MagicMock(notifications_enabled=False)
         handle_hook_event("{}")
-        mock_notify.assert_not_called()
+        mock_pipeline.assert_not_called()
 
-    @patch("kata.services.notifications.hooks.codex.notify")
+    @patch("kata.services.notifications.hooks.codex.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.codex.get_settings")
-    def test_invalid_json_returns_early(self, mock_settings, mock_notify):
+    def test_invalid_json_returns_early(self, mock_settings, mock_pipeline):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
         handle_hook_event("not json")
-        mock_notify.assert_not_called()
+        mock_pipeline.assert_not_called()
 
-    @patch("kata.services.notifications.hooks.codex.update_session_state")
-    @patch("kata.services.notifications.hooks.codex.notify")
-    @patch("kata.services.notifications.hooks.codex.generate_summary")
-    @patch("kata.services.notifications.hooks.codex.get_git_branch")
-    @patch("kata.services.notifications.hooks.codex.resolve_session_name")
-    @patch("kata.services.notifications.hooks.codex.load_session_state")
-    @patch("kata.services.notifications.hooks.codex.is_suppressed")
-    @patch("kata.services.notifications.hooks.codex.acquire_lock")
-    @patch("kata.services.notifications.hooks.codex.is_duplicate_early")
-    @patch("kata.services.notifications.hooks.codex.analyze_transcript")
+    @patch("kata.services.notifications.hooks.codex.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.codex.get_settings")
-    def test_full_pipeline(
-        self,
-        mock_settings,
-        mock_analyze,
-        mock_dedup_early,
-        mock_lock,
-        mock_suppressed,
-        mock_load_state,
-        mock_resolve,
-        mock_branch,
-        mock_summary,
-        mock_notify,
-        mock_update_state,
-    ):
-        mock_settings.return_value = MagicMock(
-            notifications_enabled=True,
-            notifications_suppress_duplicate_seconds=5,
-            notifications_suppress_question_after_task_seconds=12,
-            notifications_suppress_question_after_any_seconds=12,
-        )
-        mock_dedup_early.return_value = False
-        mock_analyze.return_value = NotificationType.TASK_COMPLETE
-        mock_lock.return_value = True
-        mock_suppressed.return_value = False
-        mock_load_state.return_value = MagicMock()
-        mock_resolve.return_value = "codex-project"
-        mock_branch.return_value = "main"
-        mock_summary.return_value = "Done"
+    def test_delegates_with_task_complete(self, mock_settings, mock_pipeline):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
 
         payload = json.dumps(
             {
                 "type": "agent-turn-complete",
                 "thread_id": "t1",
-                "transcript_path": "/tmp/codex_transcript.jsonl",
                 "cwd": "/home/user/codex-project",
                 "last-assistant-message": "Task complete.",
             }
         )
         handle_hook_event(payload)
 
-        mock_analyze.assert_called_once()
-        mock_notify.assert_called_once()
-        call_kwargs = mock_notify.call_args.kwargs
-        assert call_kwargs["type"] == NotificationType.TASK_COMPLETE
-        assert call_kwargs["session_name"] == "codex-project"
-        assert call_kwargs["source"].value == "codex"
-        mock_update_state.assert_called_once_with("t1", NotificationType.TASK_COMPLETE)
+        mock_pipeline.assert_called_once()
+        kwargs = mock_pipeline.call_args.kwargs
+        assert kwargs["source"] == NotificationSource.CODEX
+        assert kwargs["session_id"] == "t1"
+        assert kwargs["last_message"] == "Task complete."
+        # Codex classifies directly (no transcript analysis).
+        assert kwargs["classify"]() == NotificationType.TASK_COMPLETE
+        assert kwargs["extra_metadata"] == {"event_type": "agent-turn-complete"}
 
 
 class TestCodexSetupHooks:
-    """Tests for setup_hooks function in codex hook."""
+    """Tests for setup_hooks — notify must land at the top of the file."""
 
-    @patch("kata.services.notifications.hooks.codex.Path")
-    def test_setup_creates_notify_line(self, mock_path_class):
+    def _make_path(self, initial_text):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
-        mock_path.read_text.return_value = 'model = "gpt-5"\n'
+        mock_path.read_text.return_value = initial_text
+        mock_path.parent = mock_path
+        written = {}
+        mock_path.write_text = lambda data: written.__setitem__("content", data)
+        return mock_path, written
+
+    @patch("kata.services.notifications.hooks.codex.Path")
+    def test_creates_notify_line_at_top(self, mock_path_class):
+        mock_path, written = self._make_path('model = "gpt-5"\n')
         mock_path_class.home.return_value.__truediv__ = lambda self, x: mock_path
         mock_path.__truediv__ = lambda self, x: mock_path
-        mock_path.parent = mock_path
 
-        written_data = {}
+        status = setup_hooks()
+        assert status == "installed"
+        content = written["content"]
+        assert content.startswith('notify = ["kata", "notify-hook", "codex"]')
 
-        def capture_write(data):
-            written_data["content"] = data
+    @patch("kata.services.notifications.hooks.codex.Path")
+    def test_config_ending_in_table_gets_notify_at_top(self, mock_path_class):
+        # If we appended at EOF it would land *inside* [model_providers.foo].
+        cfg = 'model = "gpt-5"\n\n[model_providers.foo]\nbase_url = "http://x"\n'
+        mock_path, written = self._make_path(cfg)
+        mock_path_class.home.return_value.__truediv__ = lambda self, x: mock_path
+        mock_path.__truediv__ = lambda self, x: mock_path
 
-        mock_path.write_text = capture_write
+        status = setup_hooks()
+        assert status == "installed"
+        content = written["content"]
+        # notify must be before the table header, not after it.
+        assert content.index('notify = ["kata"') < content.index("[model_providers.foo]")
 
-        from kata.services.notifications.hooks.codex import setup_hooks
+    @patch("kata.services.notifications.hooks.codex.Path")
+    def test_user_owned_notify_is_preserved(self, mock_path_class):
+        cfg = 'notify = ["my-own-notifier"]\nmodel = "gpt-5"\n'
+        mock_path, written = self._make_path(cfg)
+        mock_path_class.home.return_value.__truediv__ = lambda self, x: mock_path
+        mock_path.__truediv__ = lambda self, x: mock_path
 
-        setup_hooks()
+        status = setup_hooks()
+        assert status == "existing_notify_preserved"
+        # Nothing written — the user's config is untouched.
+        assert "content" not in written
 
-        content = written_data["content"]
-        assert 'notify = ["kata", "notify-hook", "codex"]' in content
+    @patch("kata.services.notifications.hooks.codex.Path")
+    def test_already_installed_is_noop(self, mock_path_class):
+        cfg = 'notify = ["kata", "notify-hook", "codex"]\nmodel = "gpt-5"\n'
+        mock_path, written = self._make_path(cfg)
+        mock_path_class.home.return_value.__truediv__ = lambda self, x: mock_path
+        mock_path.__truediv__ = lambda self, x: mock_path
+
+        status = setup_hooks()
+        assert status == "already_installed"
+        assert "content" not in written

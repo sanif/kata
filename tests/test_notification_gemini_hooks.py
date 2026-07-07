@@ -4,65 +4,41 @@ import json
 from unittest.mock import MagicMock, patch
 
 from kata.services.notifications.hooks.gemini import handle_hook_event
-from kata.services.notifications.models import NotificationType
+from kata.services.notifications.models import NotificationSource, NotificationType
 
 
 class TestHandleGeminiHookEvent:
-    """Tests for the Gemini dispatch pipeline."""
+    """The Gemini module parses + classifies, then delegates to the pipeline."""
 
-    @patch("kata.services.notifications.hooks.gemini.notify")
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_disabled_notifications_returns_early(self, mock_settings, mock_notify):
+    def test_disabled_notifications_returns_early(self, mock_settings, mock_pipeline):
         mock_settings.return_value = MagicMock(notifications_enabled=False)
         handle_hook_event("after-agent", "{}")
-        mock_notify.assert_not_called()
+        mock_pipeline.assert_not_called()
 
-    @patch("kata.services.notifications.hooks.gemini.notify")
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_invalid_json_returns_early(self, mock_settings, mock_notify):
+    def test_invalid_json_returns_early(self, mock_settings, mock_pipeline):
         mock_settings.return_value = MagicMock(notifications_enabled=True)
         handle_hook_event("after-agent", "not json")
-        mock_notify.assert_not_called()
+        mock_pipeline.assert_not_called()
 
-    @patch("kata.services.notifications.hooks.gemini.update_session_state")
-    @patch("kata.services.notifications.hooks.gemini.notify")
-    @patch("kata.services.notifications.hooks.gemini.generate_summary")
-    @patch("kata.services.notifications.hooks.gemini.get_git_branch")
-    @patch("kata.services.notifications.hooks.gemini.resolve_session_name")
-    @patch("kata.services.notifications.hooks.gemini.load_session_state")
-    @patch("kata.services.notifications.hooks.gemini.is_suppressed")
-    @patch("kata.services.notifications.hooks.gemini.acquire_lock")
-    @patch("kata.services.notifications.hooks.gemini.is_duplicate_early")
-    @patch("kata.services.notifications.hooks.gemini.analyze_transcript")
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_after_agent_full_pipeline(
-        self,
-        mock_settings,
-        mock_analyze,
-        mock_dedup_early,
-        mock_lock,
-        mock_suppressed,
-        mock_load_state,
-        mock_resolve,
-        mock_branch,
-        mock_summary,
-        mock_notify,
-        mock_update_state,
+    def test_no_session_id_returns_early(self, mock_settings, mock_pipeline):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
+        handle_hook_event("after-agent", json.dumps({"cwd": "/x"}))
+        mock_pipeline.assert_not_called()
+
+    @patch("kata.services.notifications.hooks.gemini.analyze_transcript")
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
+    @patch("kata.services.notifications.hooks.gemini.get_settings")
+    def test_after_agent_delegates_with_transcript_classifier(
+        self, mock_settings, mock_pipeline, mock_analyze
     ):
-        mock_settings.return_value = MagicMock(
-            notifications_enabled=True,
-            notifications_suppress_duplicate_seconds=5,
-            notifications_suppress_question_after_task_seconds=12,
-            notifications_suppress_question_after_any_seconds=12,
-        )
-        mock_dedup_early.return_value = False
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
         mock_analyze.return_value = NotificationType.TASK_COMPLETE
-        mock_lock.return_value = True
-        mock_suppressed.return_value = False
-        mock_load_state.return_value = MagicMock()
-        mock_resolve.return_value = "gemini-project"
-        mock_branch.return_value = "main"
-        mock_summary.return_value = "Task finished successfully"
 
         stdin = json.dumps(
             {
@@ -74,46 +50,31 @@ class TestHandleGeminiHookEvent:
         )
         handle_hook_event("after-agent", stdin)
 
+        mock_pipeline.assert_called_once()
+        kwargs = mock_pipeline.call_args.kwargs
+        assert kwargs["source"] == NotificationSource.GEMINI
+        assert kwargs["session_id"] == "gem1"
+        assert kwargs["last_message"] == "I have completed the task."
+        assert kwargs["classify"]() == NotificationType.TASK_COMPLETE
         mock_analyze.assert_called_once()
-        mock_notify.assert_called_once()
-        call_kwargs = mock_notify.call_args.kwargs
-        assert call_kwargs["type"] == NotificationType.TASK_COMPLETE
-        assert call_kwargs["session_name"] == "gemini-project"
-        assert call_kwargs["source"].value == "gemini"
-        mock_update_state.assert_called_once_with("gem1", NotificationType.TASK_COMPLETE)
 
-    @patch("kata.services.notifications.hooks.gemini.update_session_state")
-    @patch("kata.services.notifications.hooks.gemini.notify")
-    @patch("kata.services.notifications.hooks.gemini.acquire_lock")
-    @patch("kata.services.notifications.hooks.gemini.is_duplicate_early")
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
     @patch("kata.services.notifications.hooks.gemini.get_settings")
-    def test_before_tool_ask_user(
-        self,
-        mock_settings,
-        mock_dedup_early,
-        mock_lock,
-        mock_notify,
-        mock_update_state,
-    ):
-        mock_settings.return_value = MagicMock(
-            notifications_enabled=True,
-            notifications_suppress_duplicate_seconds=5,
-            notifications_suppress_question_after_task_seconds=12,
-            notifications_suppress_question_after_any_seconds=12,
+    def test_before_tool_ask_user(self, mock_settings, mock_pipeline):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
+        handle_hook_event(
+            "before-tool", json.dumps({"session_id": "gem2", "tool_name": "ask_user"})
         )
-        mock_dedup_early.return_value = False
-        mock_lock.return_value = True
+        assert mock_pipeline.call_args.kwargs["classify"]() == NotificationType.QUESTION
 
-        stdin = json.dumps(
-            {
-                "session_id": "gem2",
-                "tool_name": "ask_user",
-            }
+    @patch("kata.services.notifications.hooks.gemini.run_hook_pipeline")
+    @patch("kata.services.notifications.hooks.gemini.get_settings")
+    def test_before_tool_irrelevant_skipped(self, mock_settings, mock_pipeline):
+        mock_settings.return_value = MagicMock(notifications_enabled=True)
+        handle_hook_event(
+            "before-tool", json.dumps({"session_id": "gem2", "tool_name": "read_file"})
         )
-        handle_hook_event("before-tool", stdin)
-
-        call_kwargs = mock_notify.call_args.kwargs
-        assert call_kwargs["type"] == NotificationType.QUESTION
+        mock_pipeline.assert_not_called()
 
 
 class TestGeminiSetupHooks:
