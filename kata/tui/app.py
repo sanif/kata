@@ -105,7 +105,8 @@ class EmptyState(Static):
     def compose(self) -> ComposeResult:
         """Compose empty state message."""
         yield Static(
-            "[dim]No projects registered yet.[/dim]\n\nUse [bold]kata add[/bold] to add a project.",
+            "[dim]No projects registered yet.[/dim]\n\n"
+            "Press [bold]a[/bold] to add your first project.",
             markup=True,
         )
 
@@ -208,15 +209,15 @@ class KataDashboard(App):
         Binding("ctrl+at", "quick_switch", "Switch", show=False),
         Binding("[", "focus_projects", "Projects"),
         Binding("]", "focus_recents", "Recents"),
-        Binding("1", "launch_shortcut_1", "1", show=False),
-        Binding("2", "launch_shortcut_2", "2", show=False),
-        Binding("3", "launch_shortcut_3", "3", show=False),
-        Binding("4", "launch_shortcut_4", "4", show=False),
-        Binding("5", "launch_shortcut_5", "5", show=False),
-        Binding("6", "launch_shortcut_6", "6", show=False),
-        Binding("7", "launch_shortcut_7", "7", show=False),
-        Binding("8", "launch_shortcut_8", "8", show=False),
-        Binding("9", "launch_shortcut_9", "9", show=False),
+        Binding("1", "launch_shortcut(1)", "1", show=False),
+        Binding("2", "launch_shortcut(2)", "2", show=False),
+        Binding("3", "launch_shortcut(3)", "3", show=False),
+        Binding("4", "launch_shortcut(4)", "4", show=False),
+        Binding("5", "launch_shortcut(5)", "5", show=False),
+        Binding("6", "launch_shortcut(6)", "6", show=False),
+        Binding("7", "launch_shortcut(7)", "7", show=False),
+        Binding("8", "launch_shortcut(8)", "8", show=False),
+        Binding("9", "launch_shortcut(9)", "9", show=False),
     ]
 
     _project_to_launch: Project | None = None
@@ -228,29 +229,42 @@ class KataDashboard(App):
     _session_to_switch: str | None = None
 
     def compose(self) -> ComposeResult:
-        """Compose the dashboard."""
+        """Compose the dashboard.
+
+        The full layout is always composed; the EmptyState and the main layout
+        are shown/hidden based on registry contents. This means adding the first
+        project (from the wizard) can reveal the real dashboard without a
+        restart — the ProjectTree already exists to refresh into.
+        """
         yield KataBanner(version=__version__)
 
-        registry = get_registry()
-        if len(registry) == 0:
-            yield Container(EmptyState(), id="main-container")
-        else:
-            yield Container(
-                Vertical(
-                    Horizontal(
-                        Container(ProjectTree(), id="tree-container"),
-                        Container(PreviewPane(), id="preview-container"),
-                        id="content-area",
-                    ),
-                    Container(RecentsPanel(), id="recents-container"),
+        yield Container(EmptyState(), id="empty-container")
+        yield Container(
+            Vertical(
+                Horizontal(
+                    Container(ProjectTree(), id="tree-container"),
+                    Container(PreviewPane(), id="preview-container"),
+                    id="content-area",
                 ),
-                id="main-container",
-            )
+                Container(RecentsPanel(), id="recents-container"),
+            ),
+            id="main-container",
+        )
 
         yield Footer()
 
+    def _update_empty_state(self) -> None:
+        """Show the EmptyState or the main layout based on registry contents."""
+        try:
+            is_empty = len(get_registry()) == 0
+            self.query_one("#empty-container").display = is_empty
+            self.query_one("#main-container").display = not is_empty
+        except Exception:
+            pass
+
     def on_mount(self) -> None:
         """Start status refresh timer using settings."""
+        self._update_empty_state()
         settings = get_settings()
         self._refresh_timer = self.set_interval(
             float(settings.refresh_interval), self._refresh_status
@@ -345,7 +359,6 @@ class KataDashboard(App):
 
             tree = self.query_one(ProjectTree)
 
-            # Check for project first
             project = tree.get_selected_project()
             if project:
                 project.record_open()
@@ -353,20 +366,15 @@ class KataDashboard(App):
                 registry.update(project)
                 self._project_to_launch = project
                 self.exit()
-                return
-
-            # Check for zoxide entry
-            zoxide_entry = tree.get_selected_zoxide()
-            if zoxide_entry:
-                self._zoxide_to_launch = zoxide_entry
-                self.exit()
         except Exception:
             pass
 
     def action_help(self) -> None:
-        """Show help."""
+        """Show help — including the otherwise-hidden bindings."""
         self.notify(
-            "Enter: Launch | Tab: Switch | a: Add | e: Edit | m: Menu | /: Search | q: Quit",
+            "Enter launch · Tab switch · a add · e edit · m menu · / search\n"
+            "k kill · d delete · n notifs · s settings · r refresh\n"
+            "[ projects · ] recents · 1-9 shortcuts · ctrl+space quick switch · q quit",
             title="Keyboard Shortcuts",
         )
 
@@ -386,13 +394,25 @@ class KataDashboard(App):
 
     def _on_context_menu_result(self, result: str | None) -> None:
         """Handle context menu result."""
-        if result in ("deleted", "renamed", "moved", "shortcut_changed", "color_changed"):
-            # Refresh the tree after modifications
+        if result in (
+            "deleted",
+            "renamed",
+            "moved",
+            "shortcut_changed",
+            "color_changed",
+            "killed",
+            "layout_saved",
+        ):
+            # Refresh the tree immediately so state (e.g. a killed session's dot)
+            # updates without waiting for the next timer tick.
             try:
                 tree = self.query_one(ProjectTree)
                 tree.refresh_projects()
             except Exception:
                 pass
+            # A delete may have emptied the registry.
+            if result == "deleted":
+                self._update_empty_state()
 
     def action_settings(self) -> None:
         """Open settings screen."""
@@ -416,6 +436,20 @@ class KataDashboard(App):
         # Store session name and exit — switch happens after app.run() returns
         self._session_to_switch = result
         self.exit()
+
+    def on_descendant_focus(self, event) -> None:
+        """Keep ``_focus_on_recents`` in sync with where focus actually is.
+
+        The flag was previously only flipped by the focus actions, so clicking
+        or tab-landing into the recents list left it stale — and Enter/`a` then
+        acted on the wrong pane.
+        """
+        try:
+            recents = self.query_one(RecentsPanel)
+            focused = event.widget
+            self._focus_on_recents = focused is recents or recents in focused.ancestors
+        except Exception:
+            pass
 
     def action_switch_section(self) -> None:
         """Switch focus between projects tree and recents section."""
@@ -459,8 +493,8 @@ class KataDashboard(App):
         self._project_to_launch = result
         self.exit()
 
-    def _launch_by_shortcut(self, shortcut: int) -> None:
-        """Launch project by shortcut number."""
+    def action_launch_shortcut(self, shortcut: int) -> None:
+        """Launch the project bound to a numeric shortcut (1-9)."""
         registry = get_registry()
         for project in registry.list_all():
             if project.shortcut == shortcut:
@@ -470,33 +504,6 @@ class KataDashboard(App):
                 self.exit()
                 return
         self.notify(f"No project with shortcut {shortcut}", severity="warning")
-
-    def action_launch_shortcut_1(self) -> None:
-        self._launch_by_shortcut(1)
-
-    def action_launch_shortcut_2(self) -> None:
-        self._launch_by_shortcut(2)
-
-    def action_launch_shortcut_3(self) -> None:
-        self._launch_by_shortcut(3)
-
-    def action_launch_shortcut_4(self) -> None:
-        self._launch_by_shortcut(4)
-
-    def action_launch_shortcut_5(self) -> None:
-        self._launch_by_shortcut(5)
-
-    def action_launch_shortcut_6(self) -> None:
-        self._launch_by_shortcut(6)
-
-    def action_launch_shortcut_7(self) -> None:
-        self._launch_by_shortcut(7)
-
-    def action_launch_shortcut_8(self) -> None:
-        self._launch_by_shortcut(8)
-
-    def action_launch_shortcut_9(self) -> None:
-        self._launch_by_shortcut(9)
 
     @on(SettingsScreen.SettingsChanged)
     def on_settings_changed(self, event: SettingsScreen.SettingsChanged) -> None:
@@ -543,9 +550,9 @@ class KataDashboard(App):
             pass
 
     def action_add_project(self) -> None:
-        """Open the Add Project wizard (pre-filled with zoxide path if selected)."""
+        """Open the Add Project wizard (pre-filled from the recents panel if focused)."""
         try:
-            # Check recents panel first if focused there
+            # Pre-fill from the recents panel if the user is focused there.
             if self._focus_on_recents:
                 recents = self.query_one(RecentsPanel)
                 entry = recents.get_selected_entry()
@@ -553,16 +560,7 @@ class KataDashboard(App):
                     self.push_screen(AddWizard(initial_path=entry.path), self._on_wizard_complete)
                     return
 
-            # Check tree for zoxide entry
-            tree = self.query_one(ProjectTree)
-            zoxide_entry = tree.get_selected_zoxide()
-
-            if zoxide_entry:
-                self.push_screen(
-                    AddWizard(initial_path=zoxide_entry.path), self._on_wizard_complete
-                )
-            else:
-                self.push_screen(AddWizard(), self._on_wizard_complete)
+            self.push_screen(AddWizard(), self._on_wizard_complete)
         except Exception:
             self.push_screen(AddWizard(), self._on_wizard_complete)
 
@@ -570,10 +568,13 @@ class KataDashboard(App):
         """Handle wizard completion."""
         if result:
             self.notify(f"Added project: {result.name}", title="Success")
-            # Refresh the tree
+            # Reveal the real layout (this may be the very first project) and
+            # refresh the tree so the new project appears immediately.
+            self._update_empty_state()
             try:
                 tree = self.query_one(ProjectTree)
                 tree.refresh_projects()
+                self.call_after_refresh(tree._highlight_first_project)
             except Exception:
                 pass
 
@@ -629,12 +630,6 @@ class KataDashboard(App):
         self._project_to_launch = project
         self.exit()
 
-    @on(ProjectTree.ZoxideSelected)
-    def on_zoxide_selected(self, event: ProjectTree.ZoxideSelected) -> None:
-        """Handle zoxide entry selection from tree."""
-        self._zoxide_to_launch = event.entry
-        self.exit()
-
     @on(RecentsPanel.RecentSelected)
     def on_recent_selected(self, event: RecentsPanel.RecentSelected) -> None:
         """Handle recent entry selection from recents panel."""
@@ -652,12 +647,31 @@ class KataDashboard(App):
         preview.update_project(event.project)
 
 
-def run_dashboard() -> None:
-    """Run the Kata dashboard."""
-    app = KataDashboard()
-    app.run()
+def launch_pending_target(app: "KataDashboard", *, interactive: bool = False) -> None:
+    """Launch whatever the dashboard queued before exiting.
 
-    # After the app exits, launch the selected project, zoxide entry, or switch session
+    Shared by ``run_dashboard`` and the return loop so the post-exit launch
+    logic — and its error reporting — lives in exactly one place. Errors are
+    always printed for the user (previously ``run_dashboard`` only logged them,
+    so a failed launch left the user staring at a bare shell); ``interactive``
+    additionally waits for Enter so the message survives a re-launch.
+
+    Args:
+        app: The exited dashboard instance.
+        interactive: If True, pause for Enter after printing an error.
+    """
+    from kata.services.sessions import attach_session
+
+    def _report(message: str, exc: Exception) -> None:
+        logger.error(message, exc_info=exc)
+        print(f"\n[Kata] Error: {exc}")
+        if interactive:
+            print("[Kata] Press Enter to continue...")
+            try:
+                input()
+            except EOFError:
+                pass
+
     project = app._project_to_launch
     zoxide_entry = app._zoxide_to_launch
     session_to_switch = app._session_to_switch
@@ -665,17 +679,22 @@ def run_dashboard() -> None:
     if project:
         try:
             launch_or_attach(project)
-        except Exception:
-            logger.error("Failed to launch project %s", project.name, exc_info=True)
+        except Exception as e:
+            _report(f"Failed to launch project {project.name}", e)
     elif zoxide_entry:
         try:
             launch_or_attach_adhoc(zoxide_entry.path)
-        except Exception:
-            logger.error("Failed to launch adhoc session for %s", zoxide_entry.path, exc_info=True)
+        except Exception as e:
+            _report(f"Failed to launch adhoc session for {zoxide_entry.path}", e)
     elif session_to_switch:
         try:
-            from kata.services.sessions import attach_session
-
             attach_session(session_to_switch)
-        except Exception:
-            logger.error("Failed to switch to session %s", session_to_switch, exc_info=True)
+        except Exception as e:
+            _report(f"Failed to switch to session {session_to_switch}", e)
+
+
+def run_dashboard() -> None:
+    """Run the Kata dashboard."""
+    app = KataDashboard()
+    app.run()
+    launch_pending_target(app, interactive=False)

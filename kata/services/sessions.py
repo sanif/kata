@@ -356,6 +356,33 @@ def kill_session(session_name: str) -> None:
         raise SessionError(f"Failed to kill session: {e}")
 
 
+def rename_session(old_name: str, new_name: str) -> None:
+    """Rename a running tmux session.
+
+    Uses a direct ``tmux rename-session`` subprocess call (works inside the
+    Textual TUI, unlike libtmux). The ``=`` target prefix forces an exact-name
+    match so we never rename an unrelated session that merely shares a prefix.
+
+    Args:
+        old_name: Current session name.
+        new_name: Desired session name.
+
+    Raises:
+        SessionError: If the rename fails (e.g. target name already in use).
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "rename-session", "-t", f"={old_name}", new_name],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_SHORT,
+        )
+        if result.returncode != 0:
+            raise SessionError(f"Failed to rename session: {result.stderr.strip()}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        raise SessionError(f"Failed to rename session: {e}")
+
+
 def launch_or_attach(project: Project) -> None:
     """Launch a session if it doesn't exist, or attach if it does.
 

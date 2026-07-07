@@ -1,15 +1,9 @@
-"""Layout diagram widget for displaying tmuxp window/pane structure."""
+"""Layout parsing and rendering helpers for tmuxp window/pane structure."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from textual.reactive import reactive
-from textual.widget import Widget
-from textual.widgets import Static
-
-from kata.core.models import Project
-from kata.core.templates import get_template_path
 
 
 @dataclass
@@ -232,101 +226,3 @@ def render_layout_summary(layout: LayoutInfo) -> str:
         parts.append(f"[$primary]{window.name}[/$primary] ({pane_count} {pane_text})")
 
     return " → ".join(parts)
-
-
-class LayoutDiagram(Widget):
-    """Widget to display tmuxp layout as ASCII diagram."""
-
-    DEFAULT_CSS = """
-    LayoutDiagram {
-        width: 100%;
-        height: auto;
-        background: $surface-darken-2;
-        padding: 1;
-    }
-
-    LayoutDiagram .layout-title {
-        text-style: bold;
-        color: $primary;
-        margin-bottom: 1;
-    }
-
-    LayoutDiagram .layout-empty {
-        color: $text-muted;
-        text-align: center;
-    }
-    """
-
-    project: reactive[Project | None] = reactive(None)
-
-    def __init__(
-        self,
-        project: Project | None = None,
-        *,
-        name: str | None = None,
-        id: str | None = None,
-        classes: str | None = None,
-    ) -> None:
-        """Initialize the layout diagram.
-
-        Args:
-            project: Initial project to display layout for
-            name: Widget name
-            id: Widget ID
-            classes: CSS classes
-        """
-        super().__init__(name=name, id=id, classes=classes)
-        self.project = project
-
-    def compose(self):
-        """Compose the widget."""
-        yield Static(id="layout-content")
-
-    def on_mount(self) -> None:
-        """Update content on mount."""
-        self._update_content()
-
-    def watch_project(self, project: Project | None) -> None:
-        """React to project changes."""
-        if self.is_mounted:
-            self._update_content()
-
-    def _update_content(self) -> None:
-        """Update the layout diagram content."""
-        try:
-            content_widget = self.query_one("#layout-content", Static)
-        except Exception:
-            return
-
-        if self.project is None:
-            content_widget.update("[dim]Select a project to view layout[/dim]")
-            return
-
-        config_path = get_template_path(self.project)
-        layout = parse_tmuxp_config(config_path)
-
-        if layout is None:
-            content_widget.update("[dim]No layout configuration found[/dim]")
-            return
-
-        # Build layout display
-        lines = ["[bold]Layout[/bold]", ""]
-
-        # Summary line
-        summary = render_layout_summary(layout)
-        lines.append(summary)
-        lines.append("")
-
-        # ASCII diagram
-        diagram = render_layout_diagram(layout)
-        lines.append(diagram)
-
-        content_widget.update("\n".join(lines))
-
-    def update_project(self, project: Project | None) -> None:
-        """Update the displayed project.
-
-        Args:
-            project: Project to display layout for
-        """
-        self.project = project

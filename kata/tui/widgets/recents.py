@@ -9,18 +9,9 @@ from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from kata.services.registry import get_registry
+from kata.tui.icons import project_type_icon
 from kata.utils.detection import detect_project_type
 from kata.utils.zoxide import ZoxideEntry, is_zoxide_available, query_zoxide
-
-# Project type icons (Nerd Font)
-PROJECT_TYPE_ICONS = {
-    "python": "󰌠",
-    "node": "󰎙",
-    "rust": "󱘗",
-    "go": "󰟓",
-    "ruby": "󰴭",
-    "generic": "󰉋",
-}
 
 
 class RecentsPanel(Widget, can_focus=True):
@@ -77,13 +68,6 @@ class RecentsPanel(Widget, can_focus=True):
             super().__init__()
             self.entry = entry
 
-    class RecentHighlighted(Message, bubble=True):
-        """Message sent when a recent entry is highlighted."""
-
-        def __init__(self, entry: ZoxideEntry) -> None:
-            super().__init__()
-            self.entry = entry
-
     class AddRequested(Message, bubble=True):
         """Message sent when user wants to add the selected entry as a project."""
 
@@ -101,7 +85,9 @@ class RecentsPanel(Widget, can_focus=True):
         """Initialize the recents panel."""
         super().__init__(name=name, id=id, classes=classes)
         self._entries: list[ZoxideEntry] = []
-        self._all_entries: list[ZoxideEntry] = []
+        # Cache of type icons keyed by path, computed once in the worker so
+        # re-renders never touch the filesystem.
+        self._icon_cache: dict[str, str] = {}
 
     def compose(self):
         """Compose the widget."""
@@ -116,35 +102,49 @@ class RecentsPanel(Widget, can_focus=True):
         self.refresh_recents()
 
     def refresh_recents(self) -> None:
-        """Refresh the recents list from zoxide."""
-        option_list = self.query_one("#recents-list", OptionList)
+        """Refresh the recents list — zoxide query + type detection run in a worker."""
+
+        def _work() -> None:
+            if not is_zoxide_available():
+                self.app.call_from_thread(self._render_message, "zoxide not available")
+                return
+
+            registry = get_registry()
+            registered_paths = {p.path for p in registry.list_all()}
+            entries = query_zoxide(limit=50, exclude_paths=registered_paths)
+
+            if not entries:
+                self.app.call_from_thread(self._render_message, "No recent directories")
+                return
+
+            # Compute type icons once here (filesystem I/O), off the UI thread.
+            icons = {e.path: project_type_icon(detect_project_type(e.path).value) for e in entries}
+            self.app.call_from_thread(self._apply_entries, entries, icons)
+
+        self.run_worker(_work, thread=True, exclusive=True, group="recents")
+
+    def _render_message(self, message: str) -> None:
+        """Render a placeholder message (main thread)."""
+        try:
+            option_list = self.query_one("#recents-list", OptionList)
+        except Exception:
+            return
         option_list.clear_options()
-        self._entries.clear()
-        self._all_entries.clear()
+        self._entries = []
+        option_list.add_option(Option(f"[dim]{message}[/dim]", disabled=True))
 
-        if not is_zoxide_available():
-            option_list.add_option(Option("[dim]zoxide not available[/dim]", disabled=True))
-            return
-
-        # Get registered project paths to exclude
-        registry = get_registry()
-        registered_paths = {p.path for p in registry.list_all()}
-
-        # Query zoxide entries
-        entries = query_zoxide(limit=50, exclude_paths=registered_paths)
-
-        if not entries:
-            option_list.add_option(Option("[dim]No recent directories[/dim]", disabled=True))
-            return
-
-        self._all_entries = entries
+    def _apply_entries(self, entries: list[ZoxideEntry], icons: dict[str, str]) -> None:
+        """Apply computed entries to the list (main thread, no I/O)."""
+        self._icon_cache = icons
         self._entries = entries
-
         self._render_entries(entries)
 
     def _render_entries(self, entries: list[ZoxideEntry]) -> None:
-        """Render entries to the option list."""
-        option_list = self.query_one("#recents-list", OptionList)
+        """Render entries to the option list using cached icons (no I/O)."""
+        try:
+            option_list = self.query_one("#recents-list", OptionList)
+        except Exception:
+            return
         option_list.clear_options()
         self._entries = entries
 
@@ -155,8 +155,7 @@ class RecentsPanel(Widget, can_focus=True):
         home = os.path.expanduser("~")
 
         for entry in entries:
-            project_type = detect_project_type(entry.path)
-            type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+            type_icon = self._icon_cache.get(entry.path) or project_type_icon("generic")
 
             # Shorten path for display (show ~/ for home)
             display_path = entry.path
@@ -166,30 +165,6 @@ class RecentsPanel(Widget, can_focus=True):
             # Format: icon name path
             label = f"[dim]{type_icon}[/dim] {entry.name}  [dim]{display_path}[/dim]"
             option_list.add_option(Option(label, id=entry.path))
-
-    def filter_recents(self, query: str) -> None:
-        """Filter recents by search query.
-
-        Args:
-            query: Search query to filter by (fuzzy match on name)
-        """
-        if not query:
-            self._render_entries(self._all_entries)
-            return
-
-        query_lower = query.lower()
-        filtered = [e for e in self._all_entries if self._fuzzy_match(query_lower, e.name.lower())]
-        self._render_entries(filtered)
-
-    def _fuzzy_match(self, query: str, target: str) -> bool:
-        """Check if query fuzzy matches target."""
-        if not query:
-            return True
-        query_idx = 0
-        for char in target:
-            if query_idx < len(query) and char == query[query_idx]:
-                query_idx += 1
-        return query_idx == len(query)
 
     def get_selected_entry(self) -> ZoxideEntry | None:
         """Get the currently selected zoxide entry."""
@@ -209,7 +184,6 @@ class RecentsPanel(Widget, can_focus=True):
         """Handle option highlight (cursor movement)."""
         entry = self.get_selected_entry()
         if entry:
-            self.post_message(self.RecentHighlighted(entry))
             # Update preview pane
             try:
                 from kata.tui.widgets.preview import PreviewPane

@@ -274,7 +274,7 @@ class NotificationCenterModal(ModalScreen[str | None]):
         type_tag = f" [dim italic]{type_label}[/dim italic]" if type_label else ""
 
         if is_unread:
-            return f"{icon} {message}{type_tag}" f"  [dim]{time_str:>{_COL_TIME}}[/dim]"
+            return f"{icon} {message}{type_tag}  [dim]{time_str:>{_COL_TIME}}[/dim]"
         else:
             return f"[dim]{icon} {message}{type_tag}  {time_str:>{_COL_TIME}}[/dim]"
 
@@ -330,6 +330,17 @@ class NotificationCenterModal(ModalScreen[str | None]):
         session_name = data.get("session_name", "")
         if not session_name:
             self.app.notify("No session associated", severity="warning")
+            return
+
+        # Don't switch to (or mark read) a session that no longer exists — the
+        # switch would just fail after the app exited.
+        from kata.services.sessions import session_exists
+
+        if not session_exists(session_name):
+            self.app.notify(
+                f"Session '{session_name}' is no longer running",
+                severity="warning",
+            )
             return
 
         # Mark notifications read for this session

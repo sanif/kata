@@ -1,17 +1,19 @@
 """Context Menu screen for project actions."""
 
 import platform
+import shlex
 import subprocess
 from enum import Enum, auto
 
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Vertical
+from textual.containers import Container
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, OptionList, Static
+from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
+from kata.core.config import get_project_config_path
 from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import Project
 from kata.core.settings import get_settings, update_settings
@@ -20,8 +22,18 @@ from kata.services.sessions import (
     SessionError,
     SessionNotFoundError,
     kill_session,
+    rename_session,
     save_current_session_layout,
     session_exists,
+    session_name_for,
+)
+from kata.services.tmux_style import apply_project_color, clear_project_color
+from kata.tui.screens.dialogs import (
+    ColorSelectorDialog,
+    ConfirmDialog,
+    GroupSelectorDialog,
+    InputDialog,
+    ShortcutSelectorDialog,
 )
 from kata.utils.paths import sanitize_session_name
 
@@ -234,7 +246,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         if not confirmed:
             return
 
-        session_name = sanitize_session_name(self.project.name)
+        session_name = session_name_for(self.project)
         if not session_exists(session_name):
             self.app.notify("No active session to kill", severity="warning")
             self.dismiss(None)
@@ -304,20 +316,72 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.app.notify(f"Project '{new_name}' already exists", severity="error")
             return
 
+        old_name = self.project.name
+        # Resolve the live session name BEFORE mutating anything (honours an
+        # edited session_name: in .kata.yaml).
+        old_session = session_name_for(self.project)
+        new_session = sanitize_session_name(new_name)
+
+        # 1. Registry rename (remove old, add under the new, verified-unique name).
         try:
-            # Remove old entry and add with new name
-            old_name = self.project.name
             registry.remove(old_name)
-
             self.project.name = new_name
-            self.project.config = f"{new_name}.yaml"
             registry.add(self.project)
-
-            self.app.notify(f"Renamed to: {new_name}", title="Success")
-            self.dismiss("renamed")
         except Exception as e:
+            # Best-effort restore of the original registry entry.
+            try:
+                self.project.name = old_name
+                if old_name not in registry:
+                    registry.add(self.project)
+            except Exception:
+                pass
             self.app.notify(f"Failed to rename: {e}", severity="error")
             self.dismiss(None)
+            return
+
+        # 2. Rewrite session_name: in the project's .kata.yaml and rename any
+        #    running session so the next launch resolves to the same session.
+        try:
+            self._rewrite_config_session_name(new_session)
+            if session_exists(old_session) and old_session != new_session:
+                rename_session(old_session, new_session)
+        except Exception as e:
+            # Roll the registry change back so we don't leave a project whose
+            # launch is permanently broken.
+            try:
+                registry.remove(new_name)
+                self.project.name = old_name
+                registry.add(self.project)
+                self._rewrite_config_session_name(old_session)
+            except Exception:
+                pass
+            self.app.notify(f"Failed to rename: {e}", severity="error")
+            self.dismiss(None)
+            return
+
+        self.app.notify(f"Renamed to: {new_name}", title="Success")
+        self.dismiss("renamed")
+
+    def _rewrite_config_session_name(self, session_name: str) -> None:
+        """Rewrite the ``session_name:`` key in the project's .kata.yaml.
+
+        No-op if the config file doesn't exist yet (launch will fall back to the
+        sanitized project name). Raises on read/write failure so the caller can
+        roll back.
+        """
+        import yaml
+
+        config_path = get_project_config_path(self.project.path)
+        if not config_path.exists():
+            return
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        data["session_name"] = session_name
+        config_path.write_text(
+            yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
 
     def action_move_group(self) -> None:
         """Move project to a different group."""
@@ -344,32 +408,52 @@ class ContextMenuScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
     def action_open_terminal(self) -> None:
-        """Open project directory in a new terminal window."""
+        """Open project directory in a new terminal window (in a worker thread)."""
         project_path = self.project.path
+        system = platform.system()
 
-        try:
-            if platform.system() == "Darwin":
-                # macOS: Try iTerm2 first, fall back to Terminal.app
-                self._open_macos_terminal(project_path)
-            elif platform.system() == "Linux":
-                self._open_linux_terminal(project_path)
-            else:
-                self.app.notify("Unsupported platform", severity="error")
-                self.dismiss(None)
-                return
-
-            self.app.notify(f"Opened terminal at: {project_path}", title="Success")
-            self.dismiss("terminal_opened")
-        except Exception as e:
-            self.app.notify(f"Failed to open terminal: {e}", severity="error")
+        if system not in ("Darwin", "Linux"):
+            self.app.notify("Unsupported platform", severity="error")
             self.dismiss(None)
+            return
+
+        def _work() -> None:
+            try:
+                if system == "Darwin":
+                    self._open_macos_terminal(project_path)
+                else:
+                    self._open_linux_terminal(project_path)
+            except Exception as e:
+                self.app.call_from_thread(
+                    self.app.notify,
+                    f"Failed to open terminal: {e}",
+                    severity="error",
+                )
+                self.app.call_from_thread(self.dismiss, None)
+                return
+            self.app.call_from_thread(
+                self.app.notify,
+                f"Opened terminal at: {project_path}",
+                title="Success",
+            )
+            self.app.call_from_thread(self.dismiss, "terminal_opened")
+
+        self.run_worker(_work, thread=True, exclusive=True, group="terminal")
+
+    @staticmethod
+    def _escape_applescript(text: str) -> str:
+        """Escape a string for safe embedding inside an AppleScript literal."""
+        return text.replace("\\", "\\\\").replace('"', '\\"')
 
     def _open_macos_terminal(self, path: str) -> None:
-        """Open terminal on macOS."""
+        """Open terminal on macOS (runs in a worker thread)."""
+        safe_path = self._escape_applescript(path)
+
         # Check if iTerm2 is available
         iterm_check = subprocess.run(
             ["osascript", "-e", 'id of app "iTerm"'],
             capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
         )
 
         if iterm_check.returncode == 0:
@@ -378,29 +462,37 @@ class ContextMenuScreen(ModalScreen[str | None]):
             tell application "iTerm"
                 create window with default profile
                 tell current session of current window
-                    write text "cd {path}"
+                    write text "cd \\"{safe_path}\\""
                 end tell
             end tell
             """
-            subprocess.run(["osascript", "-e", script], check=True)
         else:
             # Fall back to Terminal.app
             script = f"""
             tell application "Terminal"
-                do script "cd {path}"
+                do script "cd \\"{safe_path}\\""
                 activate
             end tell
             """
-            subprocess.run(["osascript", "-e", script], check=True)
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
 
     def _open_linux_terminal(self, path: str) -> None:
-        """Open terminal on Linux."""
-        # Try common terminal emulators
+        """Open terminal on Linux (runs in a worker thread)."""
+        quoted = shlex.quote(path)
+        shell_cmd = f'cd {quoted} && exec "$SHELL"'
+        # Try common terminal emulators. For -e style launchers the command must
+        # be run through a shell so `cd` (a builtin) actually works.
         terminals = [
             ["gnome-terminal", "--working-directory", path],
             ["konsole", "--workdir", path],
             ["xfce4-terminal", f"--working-directory={path}"],
-            ["xterm", "-e", f"cd {path} && $SHELL"],
+            ["x-terminal-emulator", "-e", "sh", "-c", shell_cmd],
+            ["xterm", "-e", "sh", "-c", shell_cmd],
         ]
 
         for cmd in terminals:
@@ -417,25 +509,33 @@ class ContextMenuScreen(ModalScreen[str | None]):
         raise RuntimeError("No supported terminal emulator found")
 
     def action_save_layout(self) -> None:
-        """Save the current session layout to the project's config."""
-        if not session_exists(sanitize_session_name(self.project.name)):
-            self.app.notify(
-                "No active session to save",
-                severity="warning",
-            )
-            self.dismiss(None)
-            return
-
+        """Save the current session layout to the project's config (in a worker)."""
+        # Show a loading indicator on the menu while the (multi-subprocess)
+        # capture runs off the UI thread.
         try:
-            config_path = save_current_session_layout(self.project)
-            self.app.notify(
-                f"Layout saved: {config_path.name}",
-                title="Success",
+            self.query_one("#menu-subtitle", Static).update(
+                f"[dim]{self.project.name}[/dim]  [yellow]saving layout…[/yellow]"
             )
-            self.dismiss("layout_saved")
-        except SessionError as e:
-            self.app.notify(f"Failed to save layout: {e}", severity="error")
-            self.dismiss(None)
+        except Exception:
+            pass
+
+        project = self.project
+
+        def _work() -> None:
+            try:
+                config_path = save_current_session_layout(project)
+            except SessionError as e:
+                self.app.call_from_thread(
+                    self.app.notify, f"Failed to save layout: {e}", severity="error"
+                )
+                self.app.call_from_thread(self.dismiss, None)
+                return
+            self.app.call_from_thread(
+                self.app.notify, f"Layout saved: {config_path.name}", title="Success"
+            )
+            self.app.call_from_thread(self.dismiss, "layout_saved")
+
+        self.run_worker(_work, thread=True, exclusive=True, group="save_layout")
 
     def action_set_shortcut(self) -> None:
         """Set a quick launch shortcut (1-9) for this project."""
@@ -483,84 +583,42 @@ class ContextMenuScreen(ModalScreen[str | None]):
         try:
             registry = get_registry()
 
-            session_name = sanitize_session_name(self.project.name)
+            session_name = session_name_for(self.project)
 
             if color == "clear":
                 self.project.color = None
                 registry.update(self.project)
                 self.app.notify("Color cleared", title="Success")
-                # Apply tmux styling in background (may fail inside TUI)
-                import threading
-
-                threading.Thread(
-                    target=self._apply_tmux_clear, args=(session_name,), daemon=True
-                ).start()
+                self._apply_color_async(session_name, None)
             else:
                 self.project.color = color
                 registry.update(self.project)
                 self.app.notify(f"Color set to: {color}", title="Success")
-                import threading
-
-                threading.Thread(
-                    target=self._apply_tmux_color,
-                    args=(session_name, color),
-                    daemon=True,
-                ).start()
+                self._apply_color_async(session_name, color)
 
             self.dismiss("color_changed")
         except Exception as e:
             self.app.notify(f"Failed to set color: {e}", severity="error")
             self.dismiss(None)
 
-    @staticmethod
-    def _apply_tmux_color(session_name: str, color: str) -> None:
-        """Apply tmux color via tmux run-shell with full Python path."""
-        try:
-            import sys
+    def _apply_color_async(self, session_name: str, color: str | None) -> None:
+        """Apply or clear tmux styling off the UI thread via direct, safe calls.
 
-            python = sys.executable
-            script = (
-                "import sys; "
-                "from kata.services.tmux_style import apply_project_color; "
-                "apply_project_color(sys.argv[1], sys.argv[2])"
-            )
-            subprocess.run(
-                [
-                    "tmux",
-                    "run-shell",
-                    "-b",
-                    f"{python} -c '{script}' {session_name} {color}",
-                ],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-        except Exception:
-            pass
+        Uses the subprocess-based ``kata.services.tmux_style`` helpers directly
+        (any project name is safe) instead of interpolating the name into a
+        ``tmux run-shell`` command string.
+        """
 
-    @staticmethod
-    def _apply_tmux_clear(session_name: str) -> None:
-        """Clear tmux color via tmux run-shell with full Python path."""
-        try:
-            import sys
+        def _work() -> None:
+            try:
+                if color is None:
+                    clear_project_color(session_name)
+                else:
+                    apply_project_color(session_name, color)
+            except Exception:
+                pass
 
-            python = sys.executable
-            script = (
-                "import sys; "
-                "from kata.services.tmux_style import clear_project_color; "
-                "clear_project_color(sys.argv[1])"
-            )
-            subprocess.run(
-                [
-                    "tmux",
-                    "run-shell",
-                    "-b",
-                    f"{python} -c '{script}' {session_name}",
-                ],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-        except Exception:
-            pass
+        self.run_worker(_work, thread=True, exclusive=False, group="tmux_style")
 
     def _on_shortcut_selected(self, shortcut: int | None) -> None:
         """Handle shortcut selection."""
@@ -595,513 +653,3 @@ class ContextMenuScreen(ModalScreen[str | None]):
         except Exception as e:
             self.app.notify(f"Failed to set shortcut: {e}", severity="error")
             self.dismiss(None)
-
-
-class ConfirmDialog(ModalScreen[bool]):
-    """Simple confirmation dialog."""
-
-    CSS = """
-    ConfirmDialog {
-        align: center middle;
-    }
-
-    ConfirmDialog #dialog-container {
-        width: 40;
-        height: auto;
-        background: $surface;
-        border: round $surface-lighten-2;
-        padding: 1 2;
-    }
-
-    ConfirmDialog #dialog-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-
-    ConfirmDialog #dialog-message {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    ConfirmDialog #options {
-        height: auto;
-        background: $surface;
-    }
-
-    ConfirmDialog #options > .option-list--option-highlighted {
-        background: $primary 20%;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("y", "confirm", "Yes", show=False),
-        Binding("n", "cancel", "No", show=False),
-    ]
-
-    def __init__(
-        self,
-        title: str,
-        message: str,
-        confirm_label: str = "Confirm",
-        *args,
-        **kwargs,
-    ) -> None:
-        """Initialize confirmation dialog."""
-        super().__init__(*args, **kwargs)
-        self._title = title
-        self._message = message
-        self._confirm_label = confirm_label
-
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        with Container(id="dialog-container"):
-            yield Static(self._title, id="dialog-title")
-            yield Static(self._message, id="dialog-message")
-            yield OptionList(
-                Option("Cancel", id="cancel"),
-                Option(self._confirm_label, id="confirm"),
-                id="options",
-            )
-
-    @on(OptionList.OptionSelected)
-    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Handle option selection."""
-        self.dismiss(event.option.id == "confirm")
-
-    def action_cancel(self) -> None:
-        """Handle escape/n key."""
-        self.dismiss(False)
-
-    def action_confirm(self) -> None:
-        """Handle y key."""
-        self.dismiss(True)
-
-
-class InputDialog(ModalScreen[str | None]):
-    """Simple input dialog."""
-
-    CSS = """
-    InputDialog {
-        align: center middle;
-    }
-
-    InputDialog #dialog-container {
-        width: 60;
-        height: auto;
-        background: $surface;
-        border: round $surface-lighten-2;
-        padding: 1 2;
-    }
-
-    InputDialog #dialog-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-
-    InputDialog #dialog-message {
-        margin-bottom: 1;
-    }
-
-    InputDialog #dialog-input {
-        margin-bottom: 1;
-    }
-
-    InputDialog #dialog-buttons {
-        width: 100%;
-        height: auto;
-        align: right middle;
-    }
-
-    InputDialog Button {
-        margin-left: 1;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    def __init__(
-        self,
-        title: str,
-        message: str,
-        default: str = "",
-        *args,
-        **kwargs,
-    ) -> None:
-        """Initialize input dialog."""
-        super().__init__(*args, **kwargs)
-        self._title = title
-        self._message = message
-        self._default = default
-
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        from textual.containers import Horizontal
-
-        with Container(id="dialog-container"):
-            yield Static(self._title, id="dialog-title")
-            yield Static(self._message, id="dialog-message")
-            yield Input(value=self._default, id="dialog-input")
-            with Horizontal(id="dialog-buttons"):
-                yield Button("Cancel", variant="default", id="cancel-btn")
-                yield Button("OK", variant="primary", id="ok-btn")
-
-    def on_mount(self) -> None:
-        """Focus the input on mount."""
-        self.query_one("#dialog-input", Input).focus()
-
-    @on(Button.Pressed, "#cancel-btn")
-    def on_cancel_pressed(self) -> None:
-        """Handle cancel button."""
-        self.dismiss(None)
-
-    @on(Button.Pressed, "#ok-btn")
-    def on_ok_pressed(self) -> None:
-        """Handle OK button."""
-        value = self.query_one("#dialog-input", Input).value
-        self.dismiss(value)
-
-    @on(Input.Submitted)
-    def on_input_submitted(self) -> None:
-        """Handle enter in input."""
-        value = self.query_one("#dialog-input", Input).value
-        self.dismiss(value)
-
-    def action_cancel(self) -> None:
-        """Handle escape key."""
-        self.dismiss(None)
-
-
-class GroupSelectorDialog(ModalScreen[str | None]):
-    """Dialog for selecting a group."""
-
-    CSS = """
-    GroupSelectorDialog {
-        align: center middle;
-    }
-
-    GroupSelectorDialog #dialog-container {
-        width: 50;
-        height: auto;
-        max-height: 20;
-        background: $surface;
-        border: round $surface-lighten-2;
-        padding: 1 2;
-    }
-
-    GroupSelectorDialog #dialog-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-
-    GroupSelectorDialog #group-list {
-        height: auto;
-        max-height: 10;
-        margin-bottom: 1;
-    }
-
-    GroupSelectorDialog #new-group-container {
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    GroupSelectorDialog #new-group-label {
-        margin-bottom: 0;
-    }
-
-    GroupSelectorDialog #dialog-buttons {
-        width: 100%;
-        height: auto;
-        align: right middle;
-    }
-
-    GroupSelectorDialog Button {
-        margin-left: 1;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    def __init__(self, current_group: str, *args, **kwargs) -> None:
-        """Initialize group selector."""
-        super().__init__(*args, **kwargs)
-        self.current_group = current_group
-
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        from textual.containers import Horizontal
-
-        registry = get_registry()
-        groups = registry.get_groups()
-
-        with Container(id="dialog-container"):
-            yield Static("Move to Group", id="dialog-title")
-
-            if groups:
-                options = [
-                    Option(f"{'● ' if g == self.current_group else '  '}{g}", id=g)
-                    for g in sorted(groups)
-                ]
-                yield OptionList(*options, id="group-list")
-
-            with Vertical(id="new-group-container"):
-                yield Static("Or create new group:", id="new-group-label")
-                yield Input(placeholder="New group name...", id="new-group-input")
-
-            with Horizontal(id="dialog-buttons"):
-                yield Button("Cancel", variant="default", id="cancel-btn")
-
-    @on(OptionList.OptionSelected)
-    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Handle group selection from list."""
-        if event.option.id:
-            self.dismiss(event.option.id)
-
-    @on(Input.Submitted, "#new-group-input")
-    def on_new_group_submitted(self, event: Input.Submitted) -> None:
-        """Handle new group input."""
-        value = event.value.strip()
-        if value:
-            self.dismiss(value)
-
-    @on(Button.Pressed, "#cancel-btn")
-    def on_cancel_pressed(self) -> None:
-        """Handle cancel button."""
-        self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        """Handle escape key."""
-        self.dismiss(None)
-
-
-class ShortcutSelectorDialog(ModalScreen[int | None]):
-    """Dialog for selecting a shortcut number (1-9)."""
-
-    CSS = """
-    ShortcutSelectorDialog {
-        align: center middle;
-    }
-
-    ShortcutSelectorDialog #dialog-container {
-        width: 40;
-        height: auto;
-        background: $surface;
-        border: round $surface-lighten-2;
-        padding: 1 2;
-    }
-
-    ShortcutSelectorDialog #dialog-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-
-    ShortcutSelectorDialog #dialog-subtitle {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    ShortcutSelectorDialog #shortcut-list {
-        height: auto;
-        max-height: 12;
-        background: $surface;
-    }
-
-    ShortcutSelectorDialog #shortcut-list > .option-list--option-highlighted {
-        background: $primary 20%;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("1", "select_1", "1", show=False),
-        Binding("2", "select_2", "2", show=False),
-        Binding("3", "select_3", "3", show=False),
-        Binding("4", "select_4", "4", show=False),
-        Binding("5", "select_5", "5", show=False),
-        Binding("6", "select_6", "6", show=False),
-        Binding("7", "select_7", "7", show=False),
-        Binding("8", "select_8", "8", show=False),
-        Binding("9", "select_9", "9", show=False),
-        Binding("0", "clear_shortcut", "Clear", show=False),
-    ]
-
-    def __init__(
-        self,
-        current_shortcut: int | None,
-        project_name: str,
-        *args,
-        **kwargs,
-    ) -> None:
-        """Initialize shortcut selector."""
-        super().__init__(*args, **kwargs)
-        self.current_shortcut = current_shortcut
-        self.project_name = project_name
-
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        with Container(id="dialog-container"):
-            yield Static("Set Shortcut", id="dialog-title")
-            yield Static("[dim]Press 1-9 or select below[/dim]", id="dialog-subtitle")
-
-            options = []
-            for i in range(1, 10):
-                marker = "● " if i == self.current_shortcut else "  "
-                options.append(Option(f"{marker}({i})", id=str(i)))
-
-            # Add clear option
-            options.append(Option("  (0) Clear shortcut", id="clear"))
-
-            yield OptionList(*options, id="shortcut-list")
-
-    def on_mount(self) -> None:
-        """Highlight current shortcut."""
-        if self.current_shortcut:
-            try:
-                option_list = self.query_one("#shortcut-list", OptionList)
-                option_list.highlighted = self.current_shortcut - 1
-            except Exception:
-                pass
-
-    @on(OptionList.OptionSelected)
-    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Handle option selection."""
-        if event.option.id == "clear":
-            self.dismiss(-1)
-        else:
-            try:
-                self.dismiss(int(event.option.id))
-            except ValueError:
-                self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        """Handle escape key."""
-        self.dismiss(None)
-
-    def action_clear_shortcut(self) -> None:
-        """Clear shortcut (0 key)."""
-        self.dismiss(-1)
-
-    def action_select_1(self) -> None:
-        self.dismiss(1)
-
-    def action_select_2(self) -> None:
-        self.dismiss(2)
-
-    def action_select_3(self) -> None:
-        self.dismiss(3)
-
-    def action_select_4(self) -> None:
-        self.dismiss(4)
-
-    def action_select_5(self) -> None:
-        self.dismiss(5)
-
-    def action_select_6(self) -> None:
-        self.dismiss(6)
-
-    def action_select_7(self) -> None:
-        self.dismiss(7)
-
-    def action_select_8(self) -> None:
-        self.dismiss(8)
-
-    def action_select_9(self) -> None:
-        self.dismiss(9)
-
-
-class ColorSelectorDialog(ModalScreen[str | None]):
-    """Dialog for selecting a project color from presets."""
-
-    CSS = """
-    ColorSelectorDialog {
-        align: center middle;
-    }
-
-    ColorSelectorDialog #dialog-container {
-        width: 40;
-        height: auto;
-        max-height: 22;
-        background: $surface;
-        border: round $surface-lighten-2;
-        padding: 1 2;
-    }
-
-    ColorSelectorDialog #dialog-title {
-        text-style: bold;
-        color: $text;
-        margin-bottom: 1;
-    }
-
-    ColorSelectorDialog #color-list {
-        height: auto;
-        max-height: 16;
-        background: $surface;
-    }
-
-    ColorSelectorDialog #color-list > .option-list--option-highlighted {
-        background: $primary 20%;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    def __init__(
-        self,
-        current_color: str | None,
-        project_name: str,
-        *args,
-        **kwargs,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.current_color = current_color
-        self.project_name = project_name
-
-    def compose(self) -> ComposeResult:
-        from kata.utils.colors import COLOR_PRESETS, resolve_color
-
-        current_hex = resolve_color(self.current_color)
-
-        with Container(id="dialog-container"):
-            yield Static("Set Color", id="dialog-title")
-
-            options = []
-            highlight_index = None
-            for i, (name, hex_val) in enumerate(COLOR_PRESETS.items()):
-                marker = "● " if hex_val == current_hex else "  "
-                options.append(Option(f"{marker}[{hex_val}]██[/{hex_val}]  {name}", id=name))
-                if hex_val == current_hex:
-                    highlight_index = i
-
-            options.append(Option("  ○  Clear color", id="clear"))
-
-            yield OptionList(*options, id="color-list")
-
-            self._highlight_index = highlight_index
-
-    def on_mount(self) -> None:
-        if self._highlight_index is not None:
-            try:
-                option_list = self.query_one("#color-list", OptionList)
-                option_list.highlighted = self._highlight_index
-            except Exception:
-                pass
-
-    @on(OptionList.OptionSelected)
-    def on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option.id == "clear":
-            self.dismiss("clear")
-        elif event.option.id:
-            self.dismiss(event.option.id)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)

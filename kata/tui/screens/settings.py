@@ -347,26 +347,51 @@ class SettingsScreen(ModalScreen[None]):
             self.app.notify(f"Sound pack: {pack_name}", title="Sounds")
             self.post_message(self.SettingsChanged(self._settings))
 
-    @on(Input.Changed, "#group-input")
-    def on_group_changed(self, event: Input.Changed) -> None:
-        """Handle default group change."""
-        value = event.value.strip()
-        if value:
-            update_settings(default_group=value)
-            self._settings = get_settings()
-            self.post_message(self.SettingsChanged(self._settings))
+    # Default value used when the Default Group input is cleared.
+    _DEFAULT_GROUP = "Uncategorized"
 
-    @on(Input.Changed, "#interval-input")
-    def on_interval_changed(self, event: Input.Changed) -> None:
-        """Handle refresh interval change."""
+    @on(Input.Submitted, "#group-input")
+    def on_group_submitted(self, event: Input.Submitted) -> None:
+        """Persist the default group on submit (Enter/blur), not per keystroke."""
+        self._persist_default_group(event.value)
+
+    @on(Input.Submitted, "#interval-input")
+    def on_interval_submitted(self, event: Input.Submitted) -> None:
+        """Persist the refresh interval on submit, validating the value."""
+        self._persist_interval(event.value, notify_invalid=True)
+
+    def _persist_default_group(self, raw: str) -> None:
+        """Persist the default group; empty resets it to the default value."""
+        value = raw.strip() or self._DEFAULT_GROUP
+        if value == self._settings.default_group:
+            return
+        update_settings(default_group=value)
+        self._settings = get_settings()
+        self.post_message(self.SettingsChanged(self._settings))
+
+    def _persist_interval(self, raw: str, *, notify_invalid: bool) -> None:
+        """Persist the refresh interval; show a message for invalid input."""
         try:
-            value = int(event.value.strip())
-            value = max(1, min(60, value))
-            update_settings(refresh_interval=value)
-            self._settings = get_settings()
-            self.post_message(self.SettingsChanged(self._settings))
+            value = int(raw.strip())
         except ValueError:
-            pass
+            if notify_invalid:
+                self.app.notify(
+                    "Refresh interval must be a whole number (1-60)",
+                    severity="warning",
+                )
+            return
+        if not 1 <= value <= 60:
+            if notify_invalid:
+                self.app.notify(
+                    "Refresh interval must be between 1 and 60 seconds",
+                    severity="warning",
+                )
+            return
+        if value == self._settings.refresh_interval:
+            return
+        update_settings(refresh_interval=value)
+        self._settings = get_settings()
+        self.post_message(self.SettingsChanged(self._settings))
 
     @on(OptionList.OptionSelected, "#project-notif-list")
     def on_project_notif_toggled(self, event: OptionList.OptionSelected) -> None:
@@ -414,5 +439,16 @@ class SettingsScreen(ModalScreen[None]):
             self.post_message(self.SettingsChanged(self._settings))
 
     def action_close(self) -> None:
-        """Handle escape key."""
+        """Persist any pending (un-submitted) input edits, then close."""
+        try:
+            self._persist_default_group(self.query_one("#group-input", Input).value)
+        except Exception:
+            pass
+        try:
+            # Silently ignore an invalid interval left in the box on close.
+            self._persist_interval(
+                self.query_one("#interval-input", Input).value, notify_invalid=False
+            )
+        except Exception:
+            pass
         self.dismiss(None)

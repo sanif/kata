@@ -11,20 +11,10 @@ from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project, SessionStatus
 from kata.services.registry import get_registry
 from kata.services.sessions import get_all_session_statuses
+from kata.tui.icons import project_type_icon, status_indicator
 from kata.utils.colors import resolve_color
 from kata.utils.detection import detect_project_type
 from kata.utils.git import format_git_indicator_rich, get_git_status
-from kata.utils.zoxide import ZoxideEntry
-
-# Project type icons (Nerd Font)
-PROJECT_TYPE_ICONS = {
-    "python": "󰌠",
-    "node": "󰎙",
-    "rust": "󱘗",
-    "go": "󰟓",
-    "ruby": "󰴭",
-    "generic": "󰉋",
-}
 
 # Group icons
 GROUP_ICONS = {
@@ -47,16 +37,10 @@ def _collect_project_labels(
     labels: dict[str, str] = {}
     for project in projects:
         status = all_statuses.get(project.name, SessionStatus.IDLE)
-        # Status indicator
-        indicators = {
-            SessionStatus.ACTIVE: "[green]●[/green]",
-            SessionStatus.DETACHED: "[yellow]●[/yellow]",
-            SessionStatus.IDLE: "[dim]○[/dim]",
-        }
-        indicator = indicators.get(status, "[dim]○[/dim]")
+        indicator = status_indicator(status)
 
         project_type = detect_project_type(project.path)
-        type_icon = PROJECT_TYPE_ICONS.get(project_type.value, PROJECT_TYPE_ICONS["generic"])
+        type_icon = project_type_icon(project_type.value)
         git_status = get_git_status(project.path)
         git_indicator = format_git_indicator_rich(git_status)
         shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
@@ -120,20 +104,6 @@ class ProjectTree(Widget):
             super().__init__()
             self.project = project
 
-    class ZoxideSelected(Message, bubble=True):
-        """Message sent when a zoxide entry is selected."""
-
-        def __init__(self, entry: ZoxideEntry) -> None:
-            super().__init__()
-            self.entry = entry
-
-    class ZoxideHighlighted(Message, bubble=True):
-        """Message sent when a zoxide entry is highlighted."""
-
-        def __init__(self, entry: ZoxideEntry) -> None:
-            super().__init__()
-            self.entry = entry
-
     # Track expanded groups
     _expanded_groups: reactive[set[str]] = reactive(set, init=False)
 
@@ -193,14 +163,18 @@ class ProjectTree(Widget):
             group_node.data = {"type": "group", "name": group_name}
 
             for project in sorted(groups[group_name], key=lambda p: p.name):
-                indicator = self._get_status_indicator(SessionStatus.IDLE)
+                indicator = status_indicator(SessionStatus.IDLE)
                 shortcut_prefix = f"[cyan][{project.shortcut}][/cyan] " if project.shortcut else ""
                 project_color = resolve_color(getattr(project, "color", None))
                 color_bar = f"[{project_color}]┃[/{project_color}] " if project_color else "  "
                 label = f"{color_bar}{indicator} {shortcut_prefix}{project.name}"
 
                 project_node = group_node.add_leaf(label)
-                project_node.data = {"type": "project", "project": project}
+                project_node.data = {
+                    "type": "project",
+                    "project": project,
+                    "label_markup": label,
+                }
                 self._projects_by_name[project.name] = project
 
         tree.root.expand()
@@ -228,7 +202,7 @@ class ProjectTree(Widget):
                         project = project_node.data.get("project")
                         if project:
                             self.post_message(self.ProjectHighlighted(project))
-                            # Also directly update preview
+                            # Also directly update preview for instant first paint
                             try:
                                 from kata.tui.widgets.preview import PreviewPane
 
@@ -262,15 +236,6 @@ class ProjectTree(Widget):
             )
         except OSError:
             pass
-
-    def _get_status_indicator(self, status: SessionStatus) -> str:
-        """Get the status indicator for a session status."""
-        indicators = {
-            SessionStatus.ACTIVE: "[green]●[/green]",
-            SessionStatus.DETACHED: "[yellow]●[/yellow]",
-            SessionStatus.IDLE: "[dim]○[/dim]",
-        }
-        return indicators.get(status, "[dim]○[/dim]")
 
     def refresh_projects(self) -> None:
         """Kick off a background refresh — I/O runs in a worker thread."""
@@ -323,8 +288,13 @@ class ProjectTree(Widget):
                         continue
                     project = project_node.data["project"]
                     new_label = labels.get(project.name, "")
-                    if new_label and str(project_node.label) != new_label:
+                    # Compare against the stored markup string, not str(label):
+                    # str() renders the Content and drops the markup, so it never
+                    # equals new_label and every label was needlessly rewritten.
+                    old_markup = project_node.data.get("label_markup")
+                    if new_label and old_markup != new_label:
                         project_node.set_label(new_label)
+                        project_node.data["label_markup"] = new_label
             return
 
         # Slow path: project set changed — full rebuild
@@ -358,7 +328,11 @@ class ProjectTree(Widget):
                 label = labels.get(project.name, project.name)
 
                 project_node = group_node.add_leaf(label)
-                project_node.data = {"type": "project", "project": project}
+                project_node.data = {
+                    "type": "project",
+                    "project": project,
+                    "label_markup": label,
+                }
                 self._projects_by_name[project.name] = project
 
         tree.root.expand()
@@ -371,14 +345,6 @@ class ProjectTree(Widget):
             return node.data.get("project")
         return None
 
-    def get_selected_zoxide(self) -> ZoxideEntry | None:
-        """Get the currently selected zoxide entry."""
-        tree = self.query_one("#project-tree", Tree)
-        node = tree.cursor_node
-        if node and node.data and node.data.get("type") == "zoxide":
-            return node.data.get("entry")
-        return None
-
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         """Handle node selection (Enter key)."""
         node = event.node
@@ -387,10 +353,6 @@ class ProjectTree(Widget):
                 project = node.data.get("project")
                 if project:
                     self.post_message(self.ProjectSelected(project))
-            elif node.data.get("type") == "zoxide":
-                entry = node.data.get("entry")
-                if entry:
-                    self.post_message(self.ZoxideSelected(entry))
             elif node.data.get("type") == "group":
                 # Toggle group expansion
                 group_name = node.data.get("name")
@@ -403,103 +365,14 @@ class ProjectTree(Widget):
                 self._save_expanded_state()
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        """Handle node highlight (cursor movement)."""
+        """Handle node highlight (cursor movement).
+
+        Posts ProjectHighlighted; the app's handler updates the preview. We do
+        NOT also update the preview directly here — doing both triggered the
+        async preview load twice per cursor move.
+        """
         node = event.node
-        if node and node.data:
-            if node.data.get("type") == "project":
-                project = node.data.get("project")
-                if project:
-                    self.post_message(self.ProjectHighlighted(project))
-                    try:
-                        from kata.tui.widgets.preview import PreviewPane
-
-                        preview = self.app.query_one(PreviewPane)
-                        preview.update_project(project)
-                    except Exception:
-                        pass
-            elif node.data.get("type") == "zoxide":
-                entry = node.data.get("entry")
-                if entry:
-                    self.post_message(self.ZoxideHighlighted(entry))
-                    try:
-                        from kata.tui.widgets.preview import PreviewPane
-
-                        preview = self.app.query_one(PreviewPane)
-                        preview.update_zoxide(entry)
-                    except Exception:
-                        pass
-
-    def expand_all(self) -> None:
-        """Expand all group nodes."""
-        tree = self.query_one("#project-tree", Tree)
-        for child in tree.root.children:
-            if child.data and child.data.get("type") == "group":
-                child.expand()
-                self._expanded_groups.add(child.data.get("name", ""))
-        self._save_expanded_state()
-
-    def collapse_all(self) -> None:
-        """Collapse all group nodes."""
-        tree = self.query_one("#project-tree", Tree)
-        for child in tree.root.children:
-            if child.data and child.data.get("type") == "group":
-                child.collapse()
-        self._expanded_groups.clear()
-        self._save_expanded_state()
-
-    def filter_projects(self, query: str) -> None:
-        """Filter projects by search query."""
-        if not query:
-            self.refresh_projects()
-            return
-
-        query_lower = query.lower()
-        tree = self.query_one("#project-tree", Tree)
-        tree.clear()
-
-        registry = get_registry()
-        projects = registry.list_all()
-
-        # Get all session statuses in one batch call
-        all_statuses = get_all_session_statuses()
-
-        # Filter registered projects and group
-        groups: dict[str, list[Project]] = {}
-        for project in projects:
-            if self._fuzzy_match(query_lower, project.name.lower()):
-                group_name = project.group or "Uncategorized"
-                if group_name not in groups:
-                    groups[group_name] = []
-                groups[group_name].append(project)
-
-        # Compute labels
-        all_filtered = [p for g in groups.values() for p in g]
-        labels = _collect_project_labels(all_filtered, all_statuses)
-
-        # Build filtered tree
-        for group_name in sorted(groups.keys()):
-            group_key = group_name.lower()
-            group_icon = GROUP_ICONS.get(group_key, GROUP_ICONS["default"])
-            group_label = f"[bold dim]{group_icon} {group_name.upper()}[/bold dim]"
-
-            group_node = tree.root.add(group_label, expand=True)
-            group_node.data = {"type": "group", "name": group_name}
-
-            for project in sorted(groups[group_name], key=lambda p: p.name):
-                label = labels.get(project.name, project.name)
-
-                project_node = group_node.add_leaf(label)
-                project_node.data = {"type": "project", "project": project}
-
-        tree.root.expand()
-
-    def _fuzzy_match(self, query: str, target: str) -> bool:
-        """Check if query fuzzy matches target."""
-        if not query:
-            return True
-
-        query_idx = 0
-        for char in target:
-            if query_idx < len(query) and char == query[query_idx]:
-                query_idx += 1
-        return query_idx == len(query)
+        if node and node.data and node.data.get("type") == "project":
+            project = node.data.get("project")
+            if project:
+                self.post_message(self.ProjectHighlighted(project))

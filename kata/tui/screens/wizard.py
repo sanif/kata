@@ -6,7 +6,6 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Button, DirectoryTree, Input, OptionList, Static
@@ -60,13 +59,6 @@ class PathStep(WizardStep):
         margin-top: 1;
     }
     """
-
-    class PathSelected(Message):
-        """Message when path is selected."""
-
-        def __init__(self, path: Path) -> None:
-            super().__init__()
-            self.path = path
 
     def compose(self) -> ComposeResult:
         """Compose the step."""
@@ -440,13 +432,6 @@ class AddWizard(ModalScreen):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    class ProjectAdded(Message):
-        """Message when project is added successfully."""
-
-        def __init__(self, project: Project) -> None:
-            super().__init__()
-            self.project = project
-
     current_step: reactive[int] = reactive(1)
     _path: Path | None = None
     _group: str = "Uncategorized"
@@ -563,6 +548,15 @@ class AddWizard(ModalScreen):
             try:
                 path = path_step.get_path()
                 validated_path = validate_project_path(path)
+
+                # Ensure the directory is writable — the config (.kata.yaml) is
+                # written into it, so a read-only dir would fail later mid-add.
+                import os
+
+                if not os.access(validated_path, os.W_OK):
+                    self._show_error(f"Directory is not writable: {validated_path}")
+                    return
+
                 self._path = validated_path
 
                 # Check for duplicate
@@ -594,38 +588,67 @@ class AddWizard(ModalScreen):
             self._add_project()
 
     def _add_project(self) -> None:
-        """Add the project to registry."""
-        if not self._path:
-            self._show_error("No path selected")
-            return
+        """Add the project — write the config first, then register it.
 
-        template_step = self.query_one("#template-step", TemplateStep)
-        project_type = template_step.get_template()
-
-        layout_step = self.query_one("#layout-step", LayoutStep)
-        layout_preset = layout_step.get_layout()
-
-        # Create project
-        project = Project.from_path(self._path, group=self._group)
-
-        # Add to registry
-        registry = get_registry()
+        The config file is written BEFORE ``registry.add`` so we never persist a
+        registry entry whose launch would raise ``ConfigNotFoundError``. Any
+        partial work is rolled back and surfaced in the wizard instead of
+        tearing down the whole TUI with a traceback.
+        """
         try:
-            registry.add(project)
-        except DuplicatePathError as e:
-            self._show_error(str(e))
-            return
+            if not self._path:
+                self._show_error("No path selected")
+                return
 
-        # Generate template with layout preset
-        config_path = write_template(project, project_type, layout_preset)
+            template_step = self.query_one("#template-step", TemplateStep)
+            project_type = template_step.get_template()
 
-        # If custom layout, open editor after creation
-        if layout_preset == LayoutPreset.CUSTOM:
-            self.app.notify(f"Edit config at: {config_path}", title="Custom Layout")
+            layout_step = self.query_one("#layout-step", LayoutStep)
+            layout_preset = layout_step.get_layout()
 
-        # Dismiss with success
-        self.post_message(self.ProjectAdded(project))
-        self.dismiss(project)
+            # Create project
+            project = Project.from_path(self._path, group=self._group)
+
+            registry = get_registry()
+
+            # Re-check duplicate before touching the filesystem.
+            if registry.find_by_path(self._path):
+                self._show_error("This path is already registered")
+                return
+
+            from kata.core.config import get_project_config_path
+
+            config_target = get_project_config_path(self._path)
+            config_existed = config_target.exists()
+
+            # 1. Write the config first.
+            try:
+                config_path = write_template(project, project_type, layout_preset)
+            except Exception as e:
+                self._show_error(f"Failed to write project config: {e}")
+                return
+
+            # 2. Register the project; roll back the config on failure.
+            try:
+                registry.add(project)
+            except DuplicatePathError as e:
+                if not config_existed:
+                    config_target.unlink(missing_ok=True)
+                self._show_error(str(e))
+                return
+            except Exception as e:
+                if not config_existed:
+                    config_target.unlink(missing_ok=True)
+                self._show_error(f"Failed to add project: {e}")
+                return
+
+            # If custom layout, open editor after creation
+            if layout_preset == LayoutPreset.CUSTOM:
+                self.app.notify(f"Edit config at: {config_path}", title="Custom Layout")
+
+            self.dismiss(project)
+        except Exception as e:  # Last-resort guard: never crash the TUI.
+            self._show_error(f"Failed to add project: {e}")
 
     def action_cancel(self) -> None:
         """Handle escape key."""

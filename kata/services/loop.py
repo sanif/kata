@@ -29,8 +29,7 @@ def run_with_loop() -> None:
 
     Press 'q' or Ctrl+C to fully exit.
     """
-    from kata.services.sessions import launch_or_attach, launch_or_attach_adhoc
-    from kata.tui.app import KataDashboard
+    from kata.tui.app import KataDashboard, launch_pending_target
 
     print("\n[Kata Return Loop] Dashboard will re-launch after detach.")
     print("[Kata Return Loop] Press 'q' or Ctrl+C to exit completely.\n")
@@ -45,33 +44,8 @@ def run_with_loop() -> None:
                 print("\n[Kata Return Loop] Exiting...")
                 break
 
-            # After the app exits, check if we need to launch a project or zoxide entry
-            project = app._project_to_launch
-            zoxide_entry = app._zoxide_to_launch
-
-            if project:
-                try:
-                    launch_or_attach(project)
-                except Exception as e:
-                    print(f"\n[Kata] Error: {e}")
-                    print("[Kata] Press Enter to continue...")
-                    input()
-            elif zoxide_entry:
-                try:
-                    launch_or_attach_adhoc(zoxide_entry.path)
-                except Exception as e:
-                    print(f"\n[Kata] Error: {e}")
-                    print("[Kata] Press Enter to continue...")
-                    input()
-            elif app._session_to_switch:
-                try:
-                    from kata.services.sessions import attach_session
-
-                    attach_session(app._session_to_switch)
-                except Exception as e:
-                    print(f"\n[Kata] Error: {e}")
-                    print("[Kata] Press Enter to continue...")
-                    input()
+            # Launch whatever the dashboard queued (shared with run_dashboard).
+            launch_pending_target(app, interactive=True)
 
             # Small delay before re-launching
             import time

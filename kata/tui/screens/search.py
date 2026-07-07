@@ -12,18 +12,10 @@ from textual.widgets.option_list import Option
 from kata.core.models import Project, SessionStatus
 from kata.services.registry import get_registry
 from kata.services.sessions import get_all_session_statuses
+from kata.tui.icons import project_type_icon, status_indicator
 from kata.utils.detection import detect_project_type
+from kata.utils.matching import fuzzy_match
 from kata.utils.zoxide import ZoxideEntry, is_zoxide_available, query_zoxide
-
-# Project type icons (Nerd Font)
-PROJECT_TYPE_ICONS = {
-    "python": "󰌠",
-    "node": "󰎙",
-    "rust": "󱘗",
-    "go": "󰟓",
-    "ruby": "󰴭",
-    "generic": "󰉋",
-}
 
 
 class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
@@ -90,6 +82,10 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
         self._items: list[Project | ZoxideEntry] = []
         self._index_map: dict[int, int] = {}  # option_index -> items_index
         self._statuses: dict[str, SessionStatus] = {}
+        # Type icons cached by path, computed once when data loads so that
+        # per-keystroke filtering never touches the filesystem.
+        self._icon_cache: dict[str, str] = {}
+        self._loaded = False
 
     def compose(self) -> ComposeResult:
         """Compose the modal."""
@@ -99,23 +95,60 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
             yield OptionList(id="search-results")
 
     def on_mount(self) -> None:
-        """Load data and focus input on mount."""
-        self._load_data()
-        self._render_items()
+        """Kick off a background load and focus input on mount."""
+        option_list = self.query_one("#search-results", OptionList)
+        option_list.add_option(Option("[dim]Loading…[/dim]", disabled=True))
         self.query_one("#search-input", Input).focus()
 
-    def _load_data(self) -> None:
-        """Load projects and zoxide entries."""
+        def _work() -> None:
+            data = self._load_data()
+            self.app.call_from_thread(self._apply_data, *data)
+
+        self.run_worker(_work, thread=True, exclusive=True, group="search-load")
+
+    def _load_data(
+        self,
+    ) -> tuple[list[Project], dict[str, SessionStatus], list[ZoxideEntry], dict[str, str]]:
+        """Load projects, statuses and zoxide entries (runs in a worker thread)."""
         registry = get_registry()
         registry.reload()
-        self._projects = list(registry.list_all())
-        self._statuses = get_all_session_statuses()
+        projects = list(registry.list_all())
+        statuses = get_all_session_statuses()
 
         if is_zoxide_available():
-            registered_paths = {p.path for p in self._projects}
-            self._zoxide_entries = query_zoxide(limit=30, exclude_paths=registered_paths)
+            registered_paths = {p.path for p in projects}
+            zoxide_entries = query_zoxide(limit=30, exclude_paths=registered_paths)
         else:
-            self._zoxide_entries = []
+            zoxide_entries = []
+
+        # Precompute all type icons here (filesystem I/O) so filtering is pure.
+        icons: dict[str, str] = {}
+        for p in projects:
+            icons[p.path] = project_type_icon(detect_project_type(p.path).value)
+        for e in zoxide_entries:
+            icons[e.path] = project_type_icon(detect_project_type(e.path).value)
+
+        return projects, statuses, zoxide_entries, icons
+
+    def _apply_data(
+        self,
+        projects: list[Project],
+        statuses: dict[str, SessionStatus],
+        zoxide_entries: list[ZoxideEntry],
+        icons: dict[str, str],
+    ) -> None:
+        """Store loaded data and render (main thread, no I/O)."""
+        self._projects = projects
+        self._statuses = statuses
+        self._zoxide_entries = zoxide_entries
+        self._icon_cache = icons
+        self._loaded = True
+        # Render with the current query (user may have typed while loading).
+        try:
+            query = self.query_one("#search-input", Input).value
+        except Exception:
+            query = ""
+        self._render_items(query)
 
     def _render_items(self, query: str = "") -> None:
         """Render filtered items to the results list."""
@@ -135,14 +168,12 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
                 key=lambda p: (p.last_opened or datetime.min,),
                 reverse=True,
             )
-            if not query or self._fuzzy_match(query_lower, p.name.lower())
+            if not query or fuzzy_match(query_lower, p.name.lower())
         ]
 
         # Filter zoxide entries
         filtered_zoxide = [
-            e
-            for e in self._zoxide_entries
-            if not query or self._fuzzy_match(query_lower, e.name.lower())
+            e for e in self._zoxide_entries if not query or fuzzy_match(query_lower, e.name.lower())
         ]
 
         # Add projects section
@@ -152,11 +183,8 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
 
             for project in filtered_projects:
                 status = self._statuses.get(project.name, SessionStatus.IDLE)
-                indicator = self._get_status_indicator(status)
-                project_type = detect_project_type(project.path)
-                type_icon = PROJECT_TYPE_ICONS.get(
-                    project_type.value, PROJECT_TYPE_ICONS["generic"]
-                )
+                indicator = status_indicator(status)
+                type_icon = self._icon_cache.get(project.path) or project_type_icon("generic")
 
                 label = (
                     f"  {indicator} {type_icon} {project.name}  [dim]{project.group.lower()}[/dim]"
@@ -179,10 +207,7 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
             option_idx += 1
 
             for entry in filtered_zoxide:
-                project_type = detect_project_type(entry.path)
-                type_icon = PROJECT_TYPE_ICONS.get(
-                    project_type.value, PROJECT_TYPE_ICONS["generic"]
-                )
+                type_icon = self._icon_cache.get(entry.path) or project_type_icon("generic")
 
                 label = f"  [dim]○[/dim] [yellow]{type_icon}[/yellow] {entry.name}  [dim]{entry.path}[/dim]"
                 option_list.add_option(Option(label))
@@ -204,27 +229,11 @@ class SearchModal(ModalScreen[Project | ZoxideEntry | None]):
             option_list.highlighted = idx
             break
 
-    def _get_status_indicator(self, status: SessionStatus) -> str:
-        """Get the status indicator for a session status."""
-        indicators = {
-            SessionStatus.ACTIVE: "[green]●[/green]",
-            SessionStatus.DETACHED: "[yellow]●[/yellow]",
-            SessionStatus.IDLE: "[dim]○[/dim]",
-        }
-        return indicators.get(status, "[dim]○[/dim]")
-
-    def _fuzzy_match(self, query: str, target: str) -> bool:
-        """Check if query fuzzy matches target."""
-        if not query:
-            return True
-        query_idx = 0
-        for char in target:
-            if query_idx < len(query) and char == query[query_idx]:
-                query_idx += 1
-        return query_idx == len(query)
-
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
+        # Ignore keystrokes until the background load has populated the lists.
+        if not self._loaded:
+            return
         self._render_items(event.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

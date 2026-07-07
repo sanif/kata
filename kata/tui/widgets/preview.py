@@ -7,9 +7,10 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
-from kata.core.models import Project, SessionStatus
+from kata.core.models import Project
 from kata.core.templates import get_template_path
 from kata.services.sessions import get_session_status
+from kata.tui.icons import project_type_icon
 from kata.tui.widgets.layout import parse_tmuxp_config, render_layout_summary
 from kata.utils.colors import resolve_color
 from kata.utils.detection import detect_project_type
@@ -173,15 +174,7 @@ class PreviewPane(Widget):
 
         last_opened = self._format_date(project.last_opened) if project.last_opened else "Never"
 
-        type_icons = {
-            "python": "󰌠",
-            "node": "󰎙",
-            "rust": "󱘗",
-            "go": "󰟓",
-            "ruby": "󰴭",
-            "generic": "󰉋",
-        }
-        type_icon = type_icons.get(project_type.value, "󰉋")
+        type_icon = project_type_icon(project_type.value)
 
         status_styles = {
             "active": ("$success", "●", "running"),
@@ -323,31 +316,28 @@ class PreviewPane(Widget):
         content_widget.update(content)
 
     def _generate_sparkline(self, count: int, width: int = 12) -> str:
-        """Generate a sparkline bar showing activity level."""
+        """Generate a sparkline bar showing activity level.
+
+        The fill colour steps through real tiers by open count: none, low,
+        medium, high, very high — each a distinct colour.
+        """
         max_count = 50
         filled = min(count, max_count) * width // max_count
         filled_blocks = "▓" * filled
         empty_blocks = "░" * (width - filled)
+        empty = f"[dim]{empty_blocks}[/dim]"
 
         if count == 0:
             return f"[dim]{filled_blocks}{empty_blocks}[/dim]"
         elif count < 5:
-            return f"[dim]{filled_blocks}[/dim][dim]{empty_blocks}[/dim]"
+            color = "dim"  # low
         elif count < 15:
-            return f"[$primary]{filled_blocks}[/$primary][dim]{empty_blocks}[/dim]"
+            color = "$secondary"  # medium
         elif count < 30:
-            return f"[$primary]{filled_blocks}[/$primary][dim]{empty_blocks}[/dim]"
+            color = "$primary"  # high
         else:
-            return f"[$success]{filled_blocks}[/$success][dim]{empty_blocks}[/dim]"
-
-    def _get_status_indicator(self, status: SessionStatus) -> str:
-        """Get the status indicator for a session status."""
-        indicators = {
-            SessionStatus.ACTIVE: "[$success]●[/$success]",
-            SessionStatus.DETACHED: "[$warning]●[/$warning]",
-            SessionStatus.IDLE: "[dim]○[/dim]",
-        }
-        return indicators.get(status, "[dim]○[/dim]")
+            color = "$success"  # very high
+        return f"[{color}]{filled_blocks}[/{color}]{empty}"
 
     def _format_date(self, date_val: str | datetime | None) -> str:
         """Format a date string or datetime for display."""
