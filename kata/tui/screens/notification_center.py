@@ -18,6 +18,7 @@ from kata.services.notifications.models import (
 )
 from kata.services.notifications.store import NotificationStore
 from kata.utils.notifications import TYPE_ICONS, escape_rich, load_grouped, time_ago
+from kata.utils.paths import extract_file_references, resolve_existing_file
 
 # Short type labels for expanded view
 TYPE_LABELS: dict[NotificationType, str] = {
@@ -129,6 +130,9 @@ class NotificationCenterModal(ModalScreen[str | None]):
         Binding("shift+r", "mark_all_read", "Read All", priority=True),
     ]
 
+    # Bumped on every reload so a stale worker callback can be dropped.
+    _load_gen: int = 0
+
     def compose(self) -> ComposeResult:
         with Vertical(id="nc-container"):
             yield Static("", id="nc-header")
@@ -143,8 +147,42 @@ class NotificationCenterModal(ModalScreen[str | None]):
         tree.focus()
 
     def _refresh_list(self) -> None:
-        """Reload notifications and rebuild the tree."""
-        grouped = load_grouped()
+        """Reload notifications off the UI thread, then rebuild the tree.
+
+        The DB read *and* the on-disk existence check for file references in
+        notification bodies run in a worker; the tree is built back on the UI
+        thread. Linkable paths are computed once per load, not per render.
+        """
+        self._load_gen += 1
+        gen = self._load_gen
+
+        def _work() -> None:
+            grouped = load_grouped()
+            # Resolve file references to real files once, off the UI thread.
+            path_map: dict[str, list[tuple[str, int | None]]] = {}
+            for notifications in grouped.values():
+                for n in notifications:
+                    refs: list[tuple[str, int | None]] = []
+                    for raw, line in extract_file_references(getattr(n, "body", "") or ""):
+                        resolved = resolve_existing_file(raw)
+                        if resolved is not None:
+                            refs.append((str(resolved), line))
+                    if refs:
+                        path_map[n.id] = refs
+            self.app.call_from_thread(self._build_tree, gen, grouped, path_map)
+
+        self.run_worker(_work, thread=True, exclusive=True, group="nc_load")
+
+    def _build_tree(
+        self,
+        gen: int,
+        grouped: dict[str, list[Notification]],
+        path_map: dict[str, list[tuple[str, int | None]]],
+    ) -> None:
+        """Build the tree on the UI thread (no I/O). Drops stale callbacks."""
+        if gen != self._load_gen:
+            return
+        self._path_map = path_map
 
         tree = self.query_one("#nc-tree", Tree)
         tree.clear()
@@ -203,9 +241,10 @@ class NotificationCenterModal(ModalScreen[str | None]):
             for n in notifications:
                 child_label = self._build_notification_label(n)
                 body_lines = _get_body_lines(n)
+                file_refs = path_map.get(n.id, [])
 
-                if body_lines:
-                    # Expandable notification node with body lines as children
+                if body_lines or file_refs:
+                    # Expandable notification node with body lines + file links.
                     notif_node = project_node.add(
                         child_label,
                         data={
@@ -222,6 +261,20 @@ class NotificationCenterModal(ModalScreen[str | None]):
                         notif_node.add_leaf(
                             f"[dim]  {escaped_line}[/dim]",
                             data={"type": "body_line", "session_name": session_name},
+                        )
+                    for file_path, line_no in file_refs:
+                        display = escape_rich(file_path)
+                        if len(display) > 52:
+                            display = "…" + display[-51:]
+                        suffix = f":{line_no}" if line_no else ""
+                        notif_node.add_leaf(
+                            f"[cyan]  󰉋 {display}{suffix}[/cyan]",
+                            data={
+                                "type": "file_path",
+                                "path": file_path,
+                                "line": line_no,
+                                "session_name": session_name,
+                            },
                         )
                 else:
                     # Leaf notification (no body to expand)
@@ -327,6 +380,11 @@ class NotificationCenterModal(ModalScreen[str | None]):
                 event.node.parent.toggle()
             return
 
+        # A file reference opens the in-TUI viewer (cmux-style), no switch.
+        if data.get("type") == "file_path":
+            self._open_file_reference(data.get("path"), data.get("line"))
+            return
+
         session_name = data.get("session_name", "")
         if not session_name:
             self.app.notify("No session associated", severity="warning")
@@ -351,6 +409,27 @@ class NotificationCenterModal(ModalScreen[str | None]):
             pass
 
         self.dismiss(session_name)
+
+    def _open_file_reference(self, path: str | None, line: int | None) -> None:
+        """Open a file reference from a notification body in the file viewer."""
+        if not path:
+            return
+        from pathlib import Path
+
+        from kata.tui.screens.file_viewer import (
+            MARKDOWN_SUFFIXES,
+            MarkdownViewerScreen,
+            TextViewerScreen,
+        )
+
+        target = Path(path)
+        if not target.is_file():
+            self.app.notify("File no longer exists", severity="warning")
+            return
+        if target.suffix.lower() in MARKDOWN_SUFFIXES:
+            self.app.push_screen(MarkdownViewerScreen(target, project_root=target.parent))
+        else:
+            self.app.push_screen(TextViewerScreen(target, goto_line=line))
 
     def action_dismiss_selected(self) -> None:
         data = self._get_selected_data()

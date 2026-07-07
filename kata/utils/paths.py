@@ -1,6 +1,56 @@
 """Path validation utilities for Kata."""
 
+import re
 from pathlib import Path
+
+# Conservative matcher for file references in free text (notification bodies).
+# Matches an absolute or ~-anchored path, optionally followed by ``:line`` (and
+# ``:col``). Relative paths are deliberately excluded: without a known root they
+# can't be resolved reliably, and we only ever linkify what exists on disk.
+_FILE_REF_RE = re.compile(
+    r"""
+    (?<![\w./~-])                       # left boundary
+    ((?:~|/)[\w./+@%~\-]+)              # anchor (~ or /) then path body
+    (?::(\d+))?                         # optional :line
+    (?::\d+)?                           # optional :col (ignored)
+    """,
+    re.VERBOSE,
+)
+
+
+def extract_file_references(text: str) -> list[tuple[str, int | None]]:
+    """Extract ``(path, line)`` file references from free text.
+
+    Returns absolute/``~`` paths (with an optional ``:line`` suffix) in order of
+    appearance, de-duplicated. Existence is NOT checked here — callers filter to
+    real files (off the UI thread). ``line`` is ``None`` when unspecified.
+    """
+    if not text:
+        return []
+    seen: set[tuple[str, int | None]] = set()
+    out: list[tuple[str, int | None]] = []
+    for match in _FILE_REF_RE.finditer(text):
+        raw = match.group(1).strip().rstrip(".,;:)]}>")
+        if not raw or raw in ("/", "~"):
+            continue
+        line = int(match.group(2)) if match.group(2) else None
+        key = (raw, line)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def resolve_existing_file(path: str) -> Path | None:
+    """Expand ``path`` and return it if it points at an existing regular file."""
+    try:
+        candidate = Path(path).expanduser()
+        if candidate.is_file():
+            return candidate
+    except OSError:
+        pass
+    return None
 
 
 class PathValidationError(Exception):
