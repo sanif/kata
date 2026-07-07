@@ -3,7 +3,7 @@ name = "kata-workspace"
 dynamic = ["version"]
 description = "Terminal-centric workspace orchestrator for tmux power users"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Kata Contributors" }]
 keywords = ["tmux", "terminal", "workspace", "orchestrator", "cli", "tui"]
 classifiers = [
@@ -44,10 +44,10 @@ dev = [
 kata = "kata.cli.app:app"
 
 [project.urls]
-Homepage = "https://github.com/kata-workspace/kata"
-Documentation = "https://github.com/kata-workspace/kata#readme"
-Repository = "https://github.com/kata-workspace/kata"
-Issues = "https://github.com/kata-workspace/kata/issues"
+Homepage = "https://github.com/sanif/kata"
+Documentation = "https://github.com/sanif/kata#readme"
+Repository = "https://github.com/sanif/kata"
+Issues = "https://github.com/sanif/kata/issues"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -61,6 +61,10 @@ local_scheme = "no-local-version"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "kata/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["kata/", "tests/", "README.md", "LICENSE", "pyproject.toml", "docs/"]
+exclude = ["docs/plans/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["kata"]

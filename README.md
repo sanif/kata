@@ -7,6 +7,10 @@
 </p>
 
 <p align="center">
+  Kata is a tmux session manager with a TUI dashboard and notification hooks for AI coding CLIs (Claude Code, Gemini CLI, Codex).
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
@@ -30,7 +34,9 @@ Press `Ctrl+Space` from any tmux session to instantly switch projects. No naviga
 
 ### AI Notifications Across Projects
 
-Running Claude Code in project A while working in project B? Kata hooks into **Claude Code**, **Gemini CLI**, and **Codex** to notify you the moment a task completes, a question is asked, or an error occurs — with macOS desktop notifications, an in-terminal notification center (`Ctrl+N`), and **6 sound packs** (default, gentle, arcade, arabic, zen, funk) with per-event audio cues. Smart suppression prevents notification spam — deduplication, cooldowns, and per-project toggles.
+Running Claude Code in project A while working in project B? Kata hooks into **Claude Code**, **Gemini CLI**, and **Codex** to notify you the moment a task completes, a question is asked, or an error occurs — with macOS desktop notifications, an in-terminal notification center (`Ctrl+N`), and sound packs with per-event audio cues. Smart suppression prevents notification spam — deduplication, cooldowns, and per-project toggles.
+
+Desktop notifications and sounds are currently macOS-only; Linux gets the in-terminal notification center.
 
 <p align="center">
   <img src="screenshots/claude_notification1.png" alt="macOS Notification — Question" height="50">
@@ -42,7 +48,7 @@ Running Claude Code in project A while working in project B? Kata hooks into **C
   <img src="screenshots/notify_popup.svg" alt="Notification Center Popup" width="600">
 </p>
 
-### Workspaces That Never Die
+### Persistent Workspaces
 
 Every project gets a persistent tmux session with smart layouts (editor + shell + tests). Detach and come back later — everything is exactly where you left it. Enable **return loop** and the dashboard auto-relaunches after every detach, so you're never dumped into a bare shell.
 
@@ -144,6 +150,9 @@ See [Worktree Guide](docs/worktrees.md) for details.
 | `kata edit NAME` | Edit project tmuxp config |
 | `kata routine [add\|remove\|list]` | Morning routine management |
 | `kata loop [enable\|disable]` | Return loop toggle |
+| `kata color [NAME] [COLOR] [--list] [--clear]` | Set, view, or clear a project's color indicator |
+| `kata notifications [list\|unread\|clear\|dismiss-all]` | View and manage notifications |
+| `kata notifyd-start` / `notifyd-stop` / `notifyd-status` | Manage the notification daemon |
 | `kata setup` | Interactive hook & keybinding setup |
 | `kata uninstall` | Interactive uninstaller |
 
@@ -161,7 +170,7 @@ See [Worktree Guide](docs/worktrees.md) for details.
 
 ## Requirements
 
-- **Python 3.10+**, **tmux**, **fzf**, **tmuxp**
+- **Python 3.10+**, **tmux**, **fzf** (`tmuxp` is installed automatically as a pip dependency)
 - Optional: **zoxide** (recents), **terminal-notifier** (macOS notifications)
 
 ---

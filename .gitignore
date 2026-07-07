@@ -45,13 +45,7 @@ Thumbs.db
 *.local
 
 # Beads (local issue tracking)
-.beads/beads.db
-.beads/beads.db-shm
-.beads/beads.db-wal
-.beads/daemon.lock
-.beads/daemon.log
-.beads/last-touched
-.beads/.local_version
+.beads/
 
 # Claude Code
 .claude/
@@ -62,3 +56,11 @@ Thumbs.db
 .token
 dist/
 .worktrees/
+
+# Private/AI-workflow exhaust (not for public repo)
+.kata.yaml
+openspec/
+prd.md
+AGENTS.md
+/CLAUDE.md
+docs/plans/

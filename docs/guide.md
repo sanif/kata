@@ -20,6 +20,8 @@ sudo apt install python3.10 tmux fzf
 pip install tmuxp
 ```
 
+Desktop notifications and sounds are currently macOS-only; Linux gets the in-terminal notification center.
+
 ```bash
 # Install kata
 pipx install kata-workspace --python python3.11
@@ -31,7 +33,7 @@ Then run `kata setup` to configure hooks and keybindings interactively.
 ### Install from Source
 
 ```bash
-git clone https://github.com/kata-workspace/kata.git
+git clone https://github.com/sanif/kata.git
 cd kata
 ./scripts/install.sh
 ```
