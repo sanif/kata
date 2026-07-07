@@ -87,6 +87,8 @@ Press `Enter` on any project to launch it. Press `Ctrl+Space` to switch between 
 | **TUI** | Interactive dashboard | Browse, search, and launch projects with keyboard |
 | **TUI** | 10 themes | kata-dark, kata-ocean, kata-warm, kata-glass, and more |
 | **TUI** | Project colors | 12 color presets + hex codes — accents in tmux status bar and project tree |
+| **TUI** | File browser | `f` opens a filtered file tree with Markdown + syntax viewers, `$EDITOR`, and clickable notification paths |
+| **TUI** | Diff viewer | `g` shows uncommitted changes newest-first with Claude Code edit badges and a `c` filter |
 | **Session** | Persistent sessions | Tmux sessions survive terminal closures |
 | **Session** | Return loop | Dashboard auto-relaunches after detach |
 | **Session** | Morning routine | `kata routine` launches all your daily projects at once |

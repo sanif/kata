@@ -77,6 +77,8 @@ Launch with `kata` (no arguments).
 | `a` | Add new project |
 | `e` | Edit project config |
 | `m` | Context menu |
+| `f` | Browse files |
+| `g` | Diff viewer (uncommitted changes) |
 | `s` | Settings |
 | `/` | Search |
 | `Tab` | Switch projects/recents focus |
@@ -89,8 +91,61 @@ Launch with `kata` (no arguments).
 ### Context Menu (`m`)
 
 - Kill Session, Delete Project, Rename, Move to Group
-- Open in Terminal, Save Layout, Set Shortcut (1-9)
+- Open in Terminal, Browse Files, View Changes, Save Layout, Set Shortcut (1-9)
 - Toggle Notifications, Set Color
+
+### File Browser (`f`)
+
+Press `f` (or pick **Browse Files** in the context menu) to open a filtered
+directory tree rooted at the selected project — inspired by cmux's click-to-view,
+without leaving Kata.
+
+| Key | Action |
+|-----|--------|
+| `Enter` / click | Open the file (Markdown viewer for `.md`/`.markdown`, syntax-highlighted read-only viewer otherwise) |
+| `.` | Toggle hidden files (off by default) |
+| `t` | Toggle the table of contents (Markdown viewer) |
+| `e` | Open the current file in `$EDITOR` |
+| `Esc` / `q` | Close the current view |
+
+Noise directories (`.git`, `node_modules`, `.venv`, `__pycache__`, `.worktrees`,
+`dist`, `build`, `.pytest_cache`, `.ruff_cache`) are hidden. In the Markdown
+viewer, relative links to other `.md` files inside the project navigate in place;
+`http(s)` links open in your browser. Binary files show a guard message and files
+over ~1MB are truncated. Notification bodies that mention real file paths (e.g.
+`/path/to/file.py:123`) turn into openable entries in the notification center.
+
+### Diff Viewer (`g`)
+
+Press `g` (or pick **View Changes** in the context menu) to see all uncommitted
+changes for the selected project — staged, unstaged, and untracked — sorted by
+file mtime, newest first. Files edited by the most recent Claude Code session
+for the project are badged with `✦`.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` or `j`/`k` | Move through files (diff pane follows) |
+| `Enter` | Open the file in the file viewer |
+| `e` | Open the file in `$EDITOR` |
+| `c` | Filter to Claude-edited files only |
+| `r` | Refresh |
+| `Esc` / `q` | Close |
+
+Each row shows a status letter (M modified, A added, D deleted, U untracked,
+R renamed) and `+`/`-` line counts. Untracked files render as all-additions;
+binary files and files over ~1MB are guarded. Non-git projects and clean
+working trees show a message instead of a diff.
+
+### Terminal cmd+click
+
+Kata's `f` browser handles file viewing inside the TUI. True "cmd+click any path
+in the terminal" is handled by your terminal emulator, not Kata. In WezTerm you
+can add a rule so paths become clickable:
+
+```lua
+config.hyperlink_rules = wezterm.default_hyperlink_rules()
+table.insert(config.hyperlink_rules, { regex = [[(/[\w./-]+\.\w+)]], format = '$0' })
+```
 
 ### Search (`/`)
 

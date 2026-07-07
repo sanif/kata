@@ -46,6 +46,8 @@ class MenuAction(Enum):
     RENAME = auto()
     MOVE_GROUP = auto()
     OPEN_TERMINAL = auto()
+    BROWSE_FILES = auto()
+    VIEW_CHANGES = auto()
     SAVE_LAYOUT = auto()
     SET_SHORTCUT = auto()
     TOGGLE_NOTIFICATIONS = auto()
@@ -59,6 +61,8 @@ _ACTION_METHODS: dict[MenuAction, str] = {
     MenuAction.RENAME: "action_rename_project",
     MenuAction.MOVE_GROUP: "action_move_group",
     MenuAction.OPEN_TERMINAL: "action_open_terminal",
+    MenuAction.BROWSE_FILES: "action_browse_files",
+    MenuAction.VIEW_CHANGES: "action_view_changes",
     MenuAction.SAVE_LAYOUT: "action_save_layout",
     MenuAction.SET_SHORTCUT: "action_set_shortcut",
     MenuAction.TOGGLE_NOTIFICATIONS: "action_toggle_notifications",
@@ -71,6 +75,8 @@ _OPTION_METHODS: dict[str, str] = {
     "rename": "action_rename_project",
     "move_group": "action_move_group",
     "open_terminal": "action_open_terminal",
+    "browse_files": "action_browse_files",
+    "view_changes": "action_view_changes",
     "save_layout": "action_save_layout",
     "set_shortcut": "action_set_shortcut",
     "toggle_notifications": "action_toggle_notifications",
@@ -130,6 +136,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("r", "rename_project", "Rename", show=False),
         Binding("g", "move_group", "Move to Group", show=False),
         Binding("t", "open_terminal", "Open Terminal", show=False),
+        Binding("f", "browse_files", "Browse Files", show=False),
+        Binding("v", "view_changes", "View Changes", show=False),
         Binding("l", "save_layout", "Save Layout", show=False),
         Binding("s", "set_shortcut", "Set Shortcut", show=False),
         Binding("n", "toggle_notifications", "Toggle Notifications", show=False),
@@ -190,6 +198,8 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 Option("[dim]r[/dim]  󰑕 Rename", id="rename"),
                 Option("[dim]g[/dim]  󰉋 Move to Group", id="move_group"),
                 Option("[dim]t[/dim]  󰆍 Open in Terminal", id="open_terminal"),
+                Option("[dim]f[/dim]  󰉋 Browse Files", id="browse_files"),
+                Option("[dim]v[/dim]  󰊢 View Changes", id="view_changes"),
                 Option("[dim]l[/dim]  󰈙 Save Layout", id="save_layout"),
                 Option(shortcut_label, id="set_shortcut"),
                 Option(notif_label, id="toggle_notifications"),
@@ -507,6 +517,20 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 continue
 
         raise RuntimeError("No supported terminal emulator found")
+
+    def action_browse_files(self) -> None:
+        """Close the menu and let the app open the file browser.
+
+        The browser is a full-screen modal; opening it from here would stack it
+        on the dismissing menu, so we hand the request back to the app via the
+        dismiss result (see ``KataDashboard._on_context_menu_result``).
+        """
+        self.dismiss("browse_files")
+
+    def action_view_changes(self) -> None:
+        """Close the menu and let the app open the diff viewer (same pattern
+        as ``action_browse_files``)."""
+        self.dismiss("view_changes")
 
     def action_save_layout(self) -> None:
         """Save the current session layout to the project's config (in a worker)."""

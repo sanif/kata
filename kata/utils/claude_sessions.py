@@ -92,6 +92,74 @@ def get_session_summary(
     return first_line
 
 
+# Claude Code tools whose invocations edit files on disk.
+_EDIT_TOOL_NAMES = frozenset({"Edit", "Write", "NotebookEdit"})
+
+
+def get_session_edited_files(
+    project_path: str | Path,
+    claude_dir: Path | None = None,
+) -> set[Path]:
+    """Collect files edited by the most recent Claude Code session for a path.
+
+    Streams the latest session JSONL line by line (same memory discipline as
+    ``_extract_last_assistant_text`` — transcripts can be hundreds of MB) and
+    gathers ``file_path``/``notebook_path`` inputs of Edit/Write/NotebookEdit
+    ``tool_use`` blocks. Returns resolved absolute paths; empty set when no
+    session exists or nothing was edited.
+    """
+    if claude_dir is None:
+        claude_dir = Path.home() / ".claude"
+
+    encoded = _encode_cwd(str(project_path))
+    session_dir = claude_dir / "projects" / encoded
+    if not session_dir.exists():
+        return set()
+
+    latest = _find_latest_session(session_dir)
+    if latest is None:
+        return set()
+
+    edited: set[Path] = set()
+    try:
+        with latest.open(encoding="utf-8", errors="replace") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                message = entry.get("message")
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if not isinstance(content, list):
+                    continue
+
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    if block.get("name") not in _EDIT_TOOL_NAMES:
+                        continue
+                    tool_input = block.get("input")
+                    if not isinstance(tool_input, dict):
+                        continue
+                    file_path = tool_input.get("file_path") or tool_input.get("notebook_path")
+                    if isinstance(file_path, str) and file_path:
+                        try:
+                            edited.add(Path(file_path).resolve())
+                        except OSError:
+                            continue
+    except (OSError, UnicodeDecodeError):
+        pass
+    return edited
+
+
 def get_current_session_id(
     worktree_path: str,
     claude_dir: Path | None = None,

@@ -201,6 +201,8 @@ class KataDashboard(App):
         Binding("/", "search", "Search"),
         Binding("?", "help", "Help"),
         Binding("m", "context_menu", "Menu"),
+        Binding("f", "browse_files", "Files"),
+        Binding("g", "view_diff", "Diff"),
         Binding("s", "settings", "Settings"),
         Binding("n", "notifications", "Notifs"),
         Binding("k", "quick_kill", "Kill", show=False),
@@ -372,7 +374,7 @@ class KataDashboard(App):
     def action_help(self) -> None:
         """Show help — including the otherwise-hidden bindings."""
         self.notify(
-            "Enter launch · Tab switch · a add · e edit · m menu · / search\n"
+            "Enter launch · Tab switch · a add · e edit · m menu · f files · g diff · / search\n"
             "k kill · d delete · n notifs · s settings · r refresh\n"
             "[ projects · ] recents · 1-9 shortcuts · ctrl+space quick switch · q quit",
             title="Keyboard Shortcuts",
@@ -394,6 +396,14 @@ class KataDashboard(App):
 
     def _on_context_menu_result(self, result: str | None) -> None:
         """Handle context menu result."""
+        if result == "browse_files":
+            # The menu deferred to the app so the browser opens on the main
+            # screen (not stacked on the dismissing modal).
+            self.action_browse_files()
+            return
+        if result == "view_changes":
+            self.action_view_diff()
+            return
         if result in (
             "deleted",
             "renamed",
@@ -413,6 +423,52 @@ class KataDashboard(App):
             # A delete may have emptied the registry.
             if result == "deleted":
                 self._update_empty_state()
+
+    def action_browse_files(self) -> None:
+        """Open the file browser for the selected project."""
+        try:
+            tree = self.query_one(ProjectTree)
+            project = tree.get_selected_project()
+
+            if not project:
+                self.notify("No project selected", severity="warning")
+                return
+
+            from pathlib import Path
+
+            from kata.tui.screens.file_browser import FileBrowserScreen
+
+            root = Path(project.path)
+            if not root.is_dir():
+                self.notify("Project path not found", severity="error")
+                return
+
+            self.push_screen(FileBrowserScreen(root, title=project.name))
+        except Exception:
+            pass
+
+    def action_view_diff(self) -> None:
+        """Open the diff viewer for the selected project's uncommitted changes."""
+        try:
+            tree = self.query_one(ProjectTree)
+            project = tree.get_selected_project()
+
+            if not project:
+                self.notify("No project selected", severity="warning")
+                return
+
+            from pathlib import Path
+
+            from kata.tui.screens.diff_viewer import DiffViewerScreen
+
+            root = Path(project.path)
+            if not root.is_dir():
+                self.notify("Project path not found", severity="error")
+                return
+
+            self.push_screen(DiffViewerScreen(root, title=project.name))
+        except Exception:
+            pass
 
     def action_settings(self) -> None:
         """Open settings screen."""
