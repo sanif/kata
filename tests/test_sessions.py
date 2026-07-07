@@ -142,7 +142,6 @@ class TestLaunchSession:
             name="test",
             path=str(tmp_path),
             group="Test",
-            config="test.yaml",
         )
 
         with patch("kata.services.sessions.migrate_project_config"):
@@ -160,7 +159,6 @@ class TestLaunchSession:
             name="test",
             path=str(tmp_path),
             group="Test",
-            config="nonexistent.yaml",
         )
 
         with patch("kata.services.sessions.migrate_project_config"):
@@ -177,7 +175,6 @@ class TestLaunchSession:
             name="test",
             path=str(tmp_path),
             group="Test",
-            config="test.yaml",
         )
 
         with patch("kata.services.sessions.migrate_project_config"):
@@ -260,7 +257,6 @@ class TestLaunchOrAttach:
             name="test",
             path=str(tmp_path),
             group="Test",
-            config="test.yaml",
         )
 
         with patch("kata.services.sessions.session_exists", return_value=True):
@@ -278,7 +274,6 @@ class TestLaunchOrAttach:
             name="test",
             path=str(tmp_path),
             group="Test",
-            config="test.yaml",
         )
 
         with patch("kata.services.sessions.migrate_project_config"):

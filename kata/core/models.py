@@ -31,19 +31,14 @@ class Project:
     name: str  # Unique identifier, derived from directory name
     path: str  # Absolute path to project root
     group: str = "Uncategorized"  # Grouping category
-    config: str = ""  # Relative path to YAML config (project-name.yaml)
     created_at: datetime = field(default_factory=datetime.now)
     last_opened: datetime | None = None
     times_opened: int = 0
     shortcut: int | None = None  # Quick launch shortcut (1-9)
     color: str | None = None  # Display color (preset name or hex)
-    # NOTE: `config` is currently write-only — set here and by the TUI rename
-    # flow, but never read to locate a config (launch uses the project's
-    # .kata.yaml via core.config). Left in place because context_menu.py still
-    # writes it; a candidate for removal in the TUI cleanup batch.
 
     def __post_init__(self) -> None:
-        """Normalize the path and default the config filename.
+        """Normalize the path.
 
         A non-empty path is resolved to an absolute path. An empty path is
         preserved as-is: some transient placeholders (e.g. "project not found"
@@ -52,8 +47,6 @@ class Project:
         """
         if self.path:
             self.path = str(Path(self.path).resolve())
-        if not self.config:
-            self.config = f"{self.name}.yaml"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize project to dictionary for JSON storage."""
@@ -61,7 +54,6 @@ class Project:
             "name": self.name,
             "path": self.path,
             "group": self.group,
-            "config": self.config,
             "created_at": self.created_at.isoformat(),
             "last_opened": self.last_opened.isoformat() if self.last_opened else None,
             "times_opened": self.times_opened,
@@ -76,7 +68,6 @@ class Project:
             name=data["name"],
             path=data["path"],
             group=data.get("group", "Uncategorized"),
-            config=data.get("config", f"{data['name']}.yaml"),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_opened=(
                 datetime.fromisoformat(data["last_opened"]) if data.get("last_opened") else None

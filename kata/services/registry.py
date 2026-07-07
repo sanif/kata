@@ -156,7 +156,6 @@ class Registry:
         counter = 1
         while project.name in self._projects:
             project.name = f"{base_name}-{counter}"
-            project.config = f"{project.name}.yaml"
             counter += 1
 
         self._projects[project.name] = project

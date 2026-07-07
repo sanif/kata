@@ -22,7 +22,6 @@ def project(tmp_path):
         name="test-project",
         path=str(tmp_path),
         group="Test",
-        config="test-project.yaml",
     )
 
 

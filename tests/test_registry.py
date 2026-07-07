@@ -48,7 +48,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
 
         registry.add(project)
@@ -62,13 +61,11 @@ class TestRegistry:
             name="project1",
             path=str(tmp_path),
             group="Test",
-            config="project1.yaml",
         )
         project2 = Project(
             name="project2",
             path=str(tmp_path),
             group="Test",
-            config="project2.yaml",
         )
 
         registry.add(project1)
@@ -87,13 +84,11 @@ class TestRegistry:
             name="project",
             path=str(path1),
             group="Test",
-            config="project.yaml",
         )
         project2 = Project(
             name="project",
             path=str(path2),
             group="Test",
-            config="project.yaml",
         )
 
         registry.add(project1)
@@ -109,7 +104,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
 
         registry.add(project)
@@ -130,7 +124,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
 
         registry.add(project)
@@ -150,7 +143,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
 
         registry.add(project)
@@ -167,7 +159,6 @@ class TestRegistry:
             name="nonexistent",
             path=str(tmp_path),
             group="Test",
-            config="nonexistent.yaml",
         )
 
         with pytest.raises(ProjectNotFoundError):
@@ -182,7 +173,6 @@ class TestRegistry:
                 name=f"project{i}",
                 path=str(path),
                 group="Test",
-                config=f"project{i}.yaml",
             )
             registry.add(project)
 
@@ -198,7 +188,6 @@ class TestRegistry:
                 name=f"project{i}",
                 path=str(path),
                 group="Group1" if i < 2 else "Group2",
-                config=f"project{i}.yaml",
             )
             registry.add(project)
 
@@ -217,7 +206,6 @@ class TestRegistry:
                 name=f"project{i}",
                 path=str(path),
                 group=group,
-                config=f"project{i}.yaml",
             )
             registry.add(project)
 
@@ -230,7 +218,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
 
         registry.add(project)
@@ -259,7 +246,6 @@ class TestRegistry:
                 name=f"project{i}",
                 path=str(path),
                 group="Test",
-                config=f"project{i}.yaml",
                 last_opened=datetime(2026, 1, i + 1),
             )
             registry.add(project)
@@ -279,7 +265,6 @@ class TestRegistry:
                 name="never-opened",
                 path=str(path0),
                 group="Test",
-                config="never-opened.yaml",
                 last_opened=None,
             )
         )
@@ -292,7 +277,6 @@ class TestRegistry:
                 name="opened",
                 path=str(path1),
                 group="Test",
-                config="opened.yaml",
                 last_opened=datetime(2026, 1, 1),
             )
         )
@@ -312,7 +296,6 @@ class TestRegistry:
                     name=f"project{i}",
                     path=str(path),
                     group="Test",
-                    config=f"project{i}.yaml",
                     last_opened=datetime(2026, 1, i + 1),
                 )
             )
@@ -333,7 +316,6 @@ class TestRegistry:
                     name=f"project{i}",
                     path=str(path),
                     group="Test",
-                    config=f"project{i}.yaml",
                     last_opened=datetime(2026, 1, i + 1),
                 )
             )
@@ -356,7 +338,6 @@ class TestRegistry:
                     name=name,
                     path=str(path),
                     group="Test",
-                    config=f"{name}.yaml",
                     last_opened=datetime(2026, 1, i + 1),
                 )
             )
@@ -376,7 +357,6 @@ class TestRegistry:
             name="atomic-test",
             path=str(path),
             group="Test",
-            config="atomic-test.yaml",
         )
         registry.add(project)
 
@@ -394,7 +374,6 @@ class TestRegistry:
             name="test-project",
             path=str(tmp_path),
             group="Test",
-            config="test-project.yaml",
         )
         registry1.add(project)
 
