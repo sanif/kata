@@ -79,6 +79,7 @@ Launch with `kata` (no arguments).
 | `m` | Context menu |
 | `f` | Browse files |
 | `g` | Diff viewer (uncommitted changes) |
+| `w` | Workspace (mouse-first project view) |
 | `s` | Settings |
 | `/` | Search |
 | `Tab` | Switch projects/recents focus |
@@ -91,7 +92,7 @@ Launch with `kata` (no arguments).
 ### Context Menu (`m`)
 
 - Kill Session, Delete Project, Rename, Move to Group
-- Open in Terminal, Browse Files, View Changes, Save Layout, Set Shortcut (1-9)
+- Open in Terminal, Browse Files, View Changes, Open Workspace, Save Layout, Set Shortcut (1-9)
 - Toggle Notifications, Set Color
 
 ### File Browser (`f`)
@@ -135,6 +136,31 @@ Each row shows a status letter (M modified, A added, D deleted, U untracked,
 R renamed) and `+`/`-` line counts. Untracked files render as all-additions;
 binary files and files over ~1MB are guarded. Non-git projects and clean
 working trees show a message instead of a diff.
+
+### Workspace (`w`)
+
+Press `w` (or pick **Open Workspace** in the context menu) for a persistent,
+mouse-first project view: a toggleable left sidebar (Projects, Changes, Files)
+next to a content area that renders markdown, syntax-highlighted text, or
+diffs. Click anything — or drive it entirely from the keyboard.
+
+Mouse: click a project to switch, a changes row to open its diff, a tree file
+to view it, `☰` to hide/show the sidebar, `Unified`/`Split` to change the diff
+layout, `✕` to close.
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Cycle focus across sections |
+| `1` / `2` / `3` / `4` | Jump to Projects / Changes / Files / Content |
+| `↑`/`↓`, `j`/`k`, `Enter` | Move within a section and activate |
+| `Ctrl+B` | Toggle the sidebar (focus moves out of hidden widgets) |
+| `s` | Switch Unified / Split diff view |
+| `e` | Open the current file in `$EDITOR` |
+| `Esc` / `q` | Close back to the dashboard |
+
+The sidebar visibility and diff mode are remembered for the rest of the app
+session. Split view pairs removals with additions side by side; long lines are
+truncated per column.
 
 ### Terminal cmd+click
 

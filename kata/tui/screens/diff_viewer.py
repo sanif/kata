@@ -22,9 +22,22 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
-from kata.tui.screens.file_viewer import _open_in_editor, open_file, read_text_file
+from kata.tui.screens.file_viewer import (
+    _open_in_editor,
+    open_file,
+    read_text_file,
+    syntax_theme_for,
+)
 from kata.utils.claude_sessions import get_session_edited_files
+from kata.utils.diff import build_untracked_diff
 from kata.utils.git import ChangedFile, collect_uncommitted_changes, get_uncommitted_diff
+
+__all__ = [
+    "DiffViewerScreen",
+    "build_untracked_diff",  # re-exported from kata.utils.diff
+    "compute_diff_text",
+    "format_change_label",
+]
 
 # Status letter -> Rich color (plain colors; Tree/OptionList markup can't use
 # theme variables like $primary).
@@ -39,21 +52,47 @@ _STATUS_COLORS: dict[str, str] = {
 _MAX_NAME = 34
 
 
-def build_untracked_diff(rel_path: str, text: str) -> str:
-    """Render an untracked file's content as an all-additions unified diff."""
-    lines = text.split("\n")
-    # A trailing newline produces one empty trailing element — drop it so we
-    # don't show a phantom added line.
-    if lines and lines[-1] == "":
-        lines = lines[:-1]
-    header = [
-        f"diff --git a/{rel_path} b/{rel_path}",
-        "new file",
-        "--- /dev/null",
-        f"+++ b/{rel_path}",
-        f"@@ -0,0 +1,{len(lines)} @@",
-    ]
-    return "\n".join(header + [f"+{line}" for line in lines])
+def compute_diff_text(root: Path, changed: ChangedFile) -> tuple[str | None, str]:
+    """Compute the display diff for one changed file. Blocking — run in a worker.
+
+    Returns ``(text, note)``: on success ``text`` is the unified diff and
+    ``note`` is empty; on failure ``text`` is ``None`` and ``note`` explains
+    why. Untracked files render as all-additions (binary/1MB guarded); shared
+    by the diff viewer and the workspace.
+    """
+    if changed.status == "U":
+        kind, payload = read_text_file(changed.path)
+        if kind == "binary":
+            return None, "Binary file — no text diff"
+        if kind == "error":
+            return None, f"Failed to read file: {payload}"
+        return build_untracked_diff(changed.rel_path, payload or ""), ""
+
+    diff = get_uncommitted_diff(root, changed.rel_path)
+    if diff is None:
+        return None, "Failed to compute diff"
+    if not diff.strip():
+        return None, "No textual changes (binary or mode-only)"
+    return diff, ""
+
+
+def format_change_label(
+    changed: ChangedFile,
+    claude_paths: set[Path],
+    *,
+    max_name: int = _MAX_NAME,
+) -> str:
+    """One-line Rich-markup label for a changed file (list rows)."""
+    color = _STATUS_COLORS.get(changed.status, "white")
+    if changed.added is None and changed.removed is None:
+        counts = "[dim]  bin[/dim]"
+    else:
+        counts = f"[green]+{changed.added or 0}[/green] [red]-{changed.removed or 0}[/red]"
+    name = changed.rel_path
+    if len(name) > max_name:
+        name = "…" + name[-(max_name - 1) :]
+    badge = " [cyan]✦[/cyan]" if changed.path in claude_paths else ""
+    return f"[{color}]{changed.status}[/{color}] {name}{badge}  {counts}"
 
 
 class DiffViewerScreen(ModalScreen[None]):
@@ -283,16 +322,7 @@ class DiffViewerScreen(ModalScreen[None]):
         option_list.highlighted = 0
 
     def _file_label(self, changed: ChangedFile) -> str:
-        color = _STATUS_COLORS.get(changed.status, "white")
-        if changed.added is None and changed.removed is None:
-            counts = "[dim]  bin[/dim]"
-        else:
-            counts = f"[green]+{changed.added or 0}[/green] [red]-{changed.removed or 0}[/red]"
-        name = changed.rel_path
-        if len(name) > _MAX_NAME:
-            name = "…" + name[-(_MAX_NAME - 1) :]
-        badge = " [cyan]✦[/cyan]" if changed.path in self._claude_paths else ""
-        return f"[{color}]{changed.status}[/{color}] {name}{badge}  {counts}"
+        return format_change_label(changed, self._claude_paths)
 
     # ── Diff pane ──────────────────────────────────────────────
 
@@ -310,25 +340,7 @@ class DiffViewerScreen(ModalScreen[None]):
         root = self.root
 
         def _work() -> None:
-            if changed.status == "U":
-                kind, payload = read_text_file(changed.path)
-                if kind == "binary":
-                    text = None
-                    note = "Binary file — no text diff"
-                elif kind == "error":
-                    text = None
-                    note = f"Failed to read file: {payload}"
-                else:
-                    text = build_untracked_diff(changed.rel_path, payload or "")
-                    note = ""
-            else:
-                diff = get_uncommitted_diff(root, changed.rel_path)
-                if diff is None:
-                    text, note = None, "Failed to compute diff"
-                elif not diff.strip():
-                    text, note = None, "No textual changes (binary or mode-only)"
-                else:
-                    text, note = diff, ""
+            text, note = compute_diff_text(root, changed)
             self.app.call_from_thread(self._apply_diff, gen, text, note)
 
         self.run_worker(_work, thread=True, exclusive=True, group="diff_render")
@@ -348,8 +360,6 @@ class DiffViewerScreen(ModalScreen[None]):
 
         from rich.syntax import Syntax
 
-        # ``ansi_*`` themes inherit the terminal palette (see TextViewerScreen).
-        dark = bool(getattr(self.app, "current_theme", None) is None or self.app.current_theme.dark)
         try:
             body.update(
                 Syntax(
@@ -357,7 +367,7 @@ class DiffViewerScreen(ModalScreen[None]):
                     "diff",
                     line_numbers=False,
                     word_wrap=False,
-                    theme="ansi_dark" if dark else "ansi_light",
+                    theme=syntax_theme_for(self.app),
                     background_color="default",
                 )
             )

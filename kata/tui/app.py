@@ -203,6 +203,7 @@ class KataDashboard(App):
         Binding("m", "context_menu", "Menu"),
         Binding("f", "browse_files", "Files"),
         Binding("g", "view_diff", "Diff"),
+        Binding("w", "open_workspace", "Workspace"),
         Binding("s", "settings", "Settings"),
         Binding("n", "notifications", "Notifs"),
         Binding("k", "quick_kill", "Kill", show=False),
@@ -375,7 +376,7 @@ class KataDashboard(App):
         """Show help — including the otherwise-hidden bindings."""
         self.notify(
             "Enter launch · Tab switch · a add · e edit · m menu · f files · g diff · / search\n"
-            "k kill · d delete · n notifs · s settings · r refresh\n"
+            "w workspace · k kill · d delete · n notifs · s settings · r refresh\n"
             "[ projects · ] recents · 1-9 shortcuts · ctrl+space quick switch · q quit",
             title="Keyboard Shortcuts",
         )
@@ -403,6 +404,9 @@ class KataDashboard(App):
             return
         if result == "view_changes":
             self.action_view_diff()
+            return
+        if result == "open_workspace":
+            self.action_open_workspace()
             return
         if result in (
             "deleted",
@@ -467,6 +471,28 @@ class KataDashboard(App):
                 return
 
             self.push_screen(DiffViewerScreen(root, title=project.name))
+        except Exception:
+            pass
+
+    def action_open_workspace(self) -> None:
+        """Open the mouse-first workspace for the selected project."""
+        try:
+            tree = self.query_one(ProjectTree)
+            project = tree.get_selected_project()
+
+            if not project:
+                self.notify("No project selected", severity="warning")
+                return
+
+            from pathlib import Path
+
+            from kata.tui.screens.workspace import WorkspaceScreen
+
+            if not Path(project.path).is_dir():
+                self.notify("Project path not found", severity="error")
+                return
+
+            self.push_screen(WorkspaceScreen(project))
         except Exception:
             pass
 

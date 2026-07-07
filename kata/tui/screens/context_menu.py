@@ -48,6 +48,7 @@ class MenuAction(Enum):
     OPEN_TERMINAL = auto()
     BROWSE_FILES = auto()
     VIEW_CHANGES = auto()
+    OPEN_WORKSPACE = auto()
     SAVE_LAYOUT = auto()
     SET_SHORTCUT = auto()
     TOGGLE_NOTIFICATIONS = auto()
@@ -63,6 +64,7 @@ _ACTION_METHODS: dict[MenuAction, str] = {
     MenuAction.OPEN_TERMINAL: "action_open_terminal",
     MenuAction.BROWSE_FILES: "action_browse_files",
     MenuAction.VIEW_CHANGES: "action_view_changes",
+    MenuAction.OPEN_WORKSPACE: "action_open_workspace",
     MenuAction.SAVE_LAYOUT: "action_save_layout",
     MenuAction.SET_SHORTCUT: "action_set_shortcut",
     MenuAction.TOGGLE_NOTIFICATIONS: "action_toggle_notifications",
@@ -77,6 +79,7 @@ _OPTION_METHODS: dict[str, str] = {
     "open_terminal": "action_open_terminal",
     "browse_files": "action_browse_files",
     "view_changes": "action_view_changes",
+    "open_workspace": "action_open_workspace",
     "save_layout": "action_save_layout",
     "set_shortcut": "action_set_shortcut",
     "toggle_notifications": "action_toggle_notifications",
@@ -138,6 +141,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
         Binding("t", "open_terminal", "Open Terminal", show=False),
         Binding("f", "browse_files", "Browse Files", show=False),
         Binding("v", "view_changes", "View Changes", show=False),
+        Binding("w", "open_workspace", "Open Workspace", show=False),
         Binding("l", "save_layout", "Save Layout", show=False),
         Binding("s", "set_shortcut", "Set Shortcut", show=False),
         Binding("n", "toggle_notifications", "Toggle Notifications", show=False),
@@ -200,6 +204,7 @@ class ContextMenuScreen(ModalScreen[str | None]):
                 Option("[dim]t[/dim]  󰆍 Open in Terminal", id="open_terminal"),
                 Option("[dim]f[/dim]  󰉋 Browse Files", id="browse_files"),
                 Option("[dim]v[/dim]  󰊢 View Changes", id="view_changes"),
+                Option("[dim]w[/dim]  󰆍 Open Workspace", id="open_workspace"),
                 Option("[dim]l[/dim]  󰈙 Save Layout", id="save_layout"),
                 Option(shortcut_label, id="set_shortcut"),
                 Option(notif_label, id="toggle_notifications"),
@@ -531,6 +536,11 @@ class ContextMenuScreen(ModalScreen[str | None]):
         """Close the menu and let the app open the diff viewer (same pattern
         as ``action_browse_files``)."""
         self.dismiss("view_changes")
+
+    def action_open_workspace(self) -> None:
+        """Close the menu and let the app open the workspace (same pattern
+        as ``action_browse_files``)."""
+        self.dismiss("open_workspace")
 
     def action_save_layout(self) -> None:
         """Save the current session layout to the project's config (in a worker)."""

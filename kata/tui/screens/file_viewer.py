@@ -81,6 +81,99 @@ def _looks_binary(chunk: bytes) -> bool:
     return b"\x00" in chunk
 
 
+def syntax_theme_for(app) -> str:
+    """Pick the Rich Syntax theme matching the app's current theme.
+
+    ``ansi_*`` themes inherit the terminal palette so highlighting stays
+    legible across all Kata themes (light and dark).
+    """
+    dark = bool(getattr(app, "current_theme", None) is None or app.current_theme.dark)
+    return "ansi_dark" if dark else "ansi_light"
+
+
+def lexer_for_path(path: Path) -> str:
+    """Best-effort Rich lexer name for a file path."""
+    name = path.name.lower()
+    if name in _LEXER_OVERRIDES:
+        return _LEXER_OVERRIDES[name]
+    suffix = path.suffix.lower()
+    if suffix in _LEXER_OVERRIDES:
+        return _LEXER_OVERRIDES[suffix]
+    # Let Rich guess from the filename; it maps most known extensions.
+    from rich.syntax import Syntax
+
+    try:
+        guessed = Syntax.guess_lexer(str(path))
+        return guessed or "text"
+    except Exception:
+        return "text"
+
+
+def open_url_in_browser(host, href: str) -> None:
+    """Open an external URL via ``webbrowser`` in a worker thread.
+
+    ``host`` is any widget/screen with ``run_worker``. Never raises — a slow
+    or odd handler must not block or crash the UI thread.
+    """
+
+    def _work() -> None:
+        try:
+            webbrowser.open(href)
+        except Exception:
+            pass
+
+    host.run_worker(_work, thread=True, exclusive=False, group="browser")
+
+
+def classify_markdown_link(
+    href: str,
+    current_path: Path,
+    project_root: Path,
+) -> tuple[str, Path | None, str]:
+    """Classify a Markdown link href for routing. Pure — no UI, no side effects.
+
+    Returns ``(kind, path, anchor)`` where kind is one of:
+
+    - ``"none"``: empty/unusable href — ignore.
+    - ``"external"``: http(s)/mailto — open in browser.
+    - ``"anchor"``: in-document ``#anchor`` (anchor in the third element).
+    - ``"markdown"``: local .md file inside the project (path set).
+    - ``"file"``: other local file inside the project (path set).
+    - ``"outside"``: resolves outside ``project_root`` — refuse.
+    - ``"missing"``: inside the project but not an existing file.
+    """
+    if not href:
+        return "none", None, ""
+    if href.startswith(("http://", "https://", "mailto:")):
+        return "external", None, ""
+    if href.startswith("#"):
+        return "anchor", None, href[1:]
+
+    anchor = ""
+    target_str = href
+    if "#" in href:
+        target_str, anchor = href.split("#", 1)
+    if not target_str:
+        return ("anchor", None, anchor) if anchor else ("none", None, "")
+
+    candidate = Path(target_str)
+    if not candidate.is_absolute():
+        candidate = current_path.parent / candidate
+    try:
+        resolved = candidate.resolve()
+        root = project_root.resolve()
+    except OSError:
+        return "none", None, ""
+
+    if not (resolved == root or root in resolved.parents):
+        return "outside", resolved, anchor
+    if not resolved.is_file():
+        return "missing", resolved, anchor
+    if resolved.suffix.lower() in MARKDOWN_SUFFIXES:
+        return "markdown", resolved, anchor
+    return "file", resolved, anchor
+
+
 def read_text_file(path: Path) -> tuple[str, str | None]:
     """Read a text file, returning ``(kind, payload)``.
 
@@ -222,18 +315,13 @@ class TextViewerScreen(ModalScreen[None]):
 
         from rich.syntax import Syntax
 
-        lexer = self._lexer_for(self.path)
-        # ``ansi_*`` themes inherit the terminal palette so highlighting stays
-        # legible across all Kata themes (light and dark).
-        dark = bool(getattr(self.app, "current_theme", None) is None or self.app.current_theme.dark)
-        theme = "ansi_dark" if dark else "ansi_light"
         try:
             syntax = Syntax(
                 payload or "",
-                lexer,
+                lexer_for_path(self.path),
                 line_numbers=True,
                 word_wrap=False,
-                theme=theme,
+                theme=syntax_theme_for(self.app),
                 background_color="default",
                 indent_guides=False,
             )
@@ -254,23 +342,6 @@ class TextViewerScreen(ModalScreen[None]):
             scroll.scroll_to(y=target, animate=False)
         except Exception:
             pass
-
-    @staticmethod
-    def _lexer_for(path: Path) -> str:
-        name = path.name.lower()
-        if name in _LEXER_OVERRIDES:
-            return _LEXER_OVERRIDES[name]
-        suffix = path.suffix.lower()
-        if suffix in _LEXER_OVERRIDES:
-            return _LEXER_OVERRIDES[suffix]
-        # Let Rich guess from the filename; it maps most known extensions.
-        from rich.syntax import Syntax
-
-        try:
-            guessed = Syntax.guess_lexer(str(path))
-            return guessed or "text"
-        except Exception:
-            return "text"
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -400,69 +471,25 @@ class MarkdownViewerScreen(ModalScreen[None]):
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         """Route link clicks: anchors in-doc, http to browser, local .md in-viewer."""
         event.stop()
-        href = event.href or ""
-        if not href:
-            return
-
-        # External links → system browser, in a worker so a slow/odd handler
-        # never blocks or crashes the UI thread.
-        if href.startswith(("http://", "https://", "mailto:")):
-            self._open_external(href)
-            return
-
-        # In-document anchor.
-        if href.startswith("#"):
+        kind, resolved, anchor = classify_markdown_link(
+            event.href or "", self.path, self.project_root
+        )
+        if kind == "external":
+            open_url_in_browser(self, event.href)
+        elif kind == "anchor":
             try:
-                self.query_one(MarkdownViewer).document.goto_anchor(href[1:])
+                self.query_one(MarkdownViewer).document.goto_anchor(anchor)
             except Exception:
                 pass
-            return
-
-        # Otherwise treat as a relative (or absolute) filesystem path, possibly
-        # with a trailing #anchor.
-        anchor = ""
-        target_str = href
-        if "#" in href:
-            target_str, anchor = href.split("#", 1)
-        if not target_str:
-            if anchor:
-                try:
-                    self.query_one(MarkdownViewer).document.goto_anchor(anchor)
-                except Exception:
-                    pass
-            return
-
-        candidate = Path(target_str)
-        if not candidate.is_absolute():
-            candidate = self.path.parent / candidate
-        try:
-            resolved = candidate.resolve()
-        except OSError:
-            return
-
-        # Confine to the project root — never wander outside on a crafted link.
-        root = self.project_root.resolve()
-        if not (resolved == root or root in resolved.parents):
+        elif kind == "outside":
             self.app.notify("Link points outside the project", severity="warning")
-            return
-        if not resolved.is_file():
+        elif kind == "missing":
             self.app.notify("Linked file not found", severity="warning")
-            return
-
-        if resolved.suffix.lower() in MARKDOWN_SUFFIXES:
+        elif kind == "markdown":
             self._load(resolved)
-        else:
+        elif kind == "file":
             # Non-markdown local file → open the text viewer on top.
             self.app.push_screen(TextViewerScreen(resolved))
-
-    def _open_external(self, href: str) -> None:
-        def _work() -> None:
-            try:
-                webbrowser.open(href)
-            except Exception:
-                pass
-
-        self.run_worker(_work, thread=True, exclusive=False, group="browser")
 
     def action_toggle_toc(self) -> None:
         try:
