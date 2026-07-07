@@ -12,13 +12,17 @@ Architecture:
 import os
 import subprocess
 import sys
-import termios
-import tty
 from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
+from kata.cli._termui import (
+    FrameRenderer,
+    content_row,
+    guard_tty,
+    raw_screen,
+    read_key,
+)
 from kata.core.constants import (
     SESSION_READY_MAX_RETRIES,
     SESSION_READY_POLL_INTERVAL,
@@ -26,6 +30,19 @@ from kata.core.constants import (
     WORKTREE_SPINNER_INTERVAL,
 )
 from kata.core.models import WorktreeStatus
+
+
+def _display_message(msg: str) -> None:
+    """Surface a one-line status in the tmux status bar (launcher context)."""
+    try:
+        subprocess.run(
+            ["tmux", "display-message", msg],
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
 
 # ── Constants ──────────────────────────────────────────────────────────
 
@@ -36,18 +53,6 @@ _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 
 
 # ── Rendering ────────────────────────────────────────────────────────────
-
-
-def _content_row(content: Text, width: int) -> Text:
-    """Wrap content in box side borders, padding to full width."""
-    plain_len = len(content.plain)
-    pad = max(0, width - 4 - plain_len)
-    t = Text()
-    t.append("│ ", "dim")
-    t.append_text(content)
-    t.append(" " * pad)
-    t.append(" │", "dim")
-    return t
 
 
 def _render_worktree_row(
@@ -160,25 +165,31 @@ def render_worktree_panel(
     lines.append(top)
 
     if not worktrees:
-        lines.append(_content_row(Text(""), w))
+        lines.append(content_row(Text(""), w))
         empty = Text()
         empty.append("  No worktrees", "dim")
-        lines.append(_content_row(empty, w))
-        lines.append(_content_row(Text(""), w))
+        lines.append(content_row(empty, w))
+        lines.append(content_row(Text(""), w))
     else:
-        # ── Main worktree (always first, separated) ──
-        main_wt = worktrees[0] if worktrees and worktrees[0].is_main else None
-        other_wts = worktrees[1:] if main_wt else worktrees
+        # ── Main worktree (always rendered first, wherever it sits in the
+        # list) so the Alt+Tab reorder can never mislabel main under
+        # "branches". selected_index still refers to positions in the list, so
+        # highlighting is resolved by identity.
+        main_wt = next((wt for wt in worktrees if wt.is_main), None)
+        other_wts = [wt for wt in worktrees if not wt.is_main]
 
         if main_wt:
-            lines.append(_content_row(Text(""), w))
+            lines.append(content_row(Text(""), w))
             is_current = current_worktree is not None and (
                 current_worktree == main_wt.info.name or current_worktree == main_wt.info.branch
             )
-            row, summary = _render_worktree_row(main_wt, selected_index == 0, is_current, avail)
-            lines.append(_content_row(row, w))
+            main_idx = worktrees.index(main_wt)
+            row, summary = _render_worktree_row(
+                main_wt, selected_index == main_idx, is_current, avail
+            )
+            lines.append(content_row(row, w))
             if summary:
-                lines.append(_content_row(summary, w))
+                lines.append(content_row(summary, w))
 
         # ── Separator before branches ──
         if other_wts:
@@ -192,20 +203,20 @@ def render_worktree_panel(
             sep_line.append("┤", "dim")
             lines.append(sep_line)
 
-            for i, wt in enumerate(other_wts):
-                idx = i + (1 if main_wt else 0)
+            for wt in other_wts:
+                idx = worktrees.index(wt)
                 is_current = current_worktree is not None and (
                     current_worktree == wt.info.name or current_worktree == wt.info.branch
                 )
                 row, summary = _render_worktree_row(wt, selected_index == idx, is_current, avail)
-                lines.append(_content_row(row, w))
+                lines.append(content_row(row, w))
                 if summary:
-                    lines.append(_content_row(summary, w))
+                    lines.append(content_row(summary, w))
         elif not main_wt:
-            lines.append(_content_row(Text(""), w))
+            lines.append(content_row(Text(""), w))
 
     # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Separator ──
     sep = Text()
@@ -231,7 +242,7 @@ def render_worktree_panel(
     centered_hint = Text()
     centered_hint.append(" " * left_pad)
     centered_hint.append_text(hint)
-    lines.append(_content_row(centered_hint, w))
+    lines.append(content_row(centered_hint, w))
 
     # ── Bottom border ──
     bot = Text()
@@ -272,42 +283,13 @@ def _calc_worktree_popup_size(
 # ── Input ────────────────────────────────────────────────────────────────
 
 
-def _read_key() -> str:
-    """Read a single keypress in raw terminal mode, blocking."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = os.read(fd, 1)
-        if ch == b"\x17":  # Ctrl+W
-            return "ctrl+w"
-        elif ch == b"\x1b":
-            import select as _sel
-
-            r, _, _ = _sel.select([fd], [], [], 0.1)
-            if r:
-                seq = os.read(fd, 8)
-                if seq == b"[A":
-                    return "up"
-                elif seq == b"[B":
-                    return "down"
-                return "escape"
-            return "escape"
-        elif ch in (b"\r", b"\n"):
-            return "enter"
-        elif ch == b"\x03":
-            return "escape"
-        return ch.decode("utf-8", errors="replace")
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-
 def _render_create_panel(
     project_name: str,
     buf: str,
     step: str,  # "name" or "context"
     term_width: int,
     has_claude: bool = False,
+    message: str | None = None,
 ) -> list[Text]:
     """Render the create-worktree panel with inline input."""
     w = term_width
@@ -325,42 +307,48 @@ def _render_create_panel(
     top.append("╮", "dim")
     lines.append(top)
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Project context ──
     ctx = Text()
     ctx.append("  from ", "dim")
     ctx.append(project_name, "bold")
-    lines.append(_content_row(ctx, w))
+    lines.append(content_row(ctx, w))
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     if step == "name":
         # ── Branch name input ──
         label = Text()
         label.append(f"  {_ICON_BRANCH} branch name", "dim")
-        lines.append(_content_row(label, w))
+        lines.append(content_row(label, w))
 
         input_row = Text()
         input_row.append("  > ", "cyan")
         input_row.append(buf, "bold")
         input_row.append("_", "dim")  # cursor
-        lines.append(_content_row(input_row, w))
+        lines.append(content_row(input_row, w))
+
+        if message:
+            lines.append(content_row(Text(""), w))
+            err = Text()
+            err.append(f"  {message}", "yellow")
+            lines.append(content_row(err, w))
     else:
         # ── Show chosen name ──
         chosen = Text()
         chosen.append(f"  {_ICON_BRANCH} ", "dim")
         chosen.append(buf, "bold")
-        lines.append(_content_row(chosen, w))
+        lines.append(content_row(chosen, w))
 
-        lines.append(_content_row(Text(""), w))
+        lines.append(content_row(Text(""), w))
 
         # ── Context mode selection ──
         mode_label = Text()
         mode_label.append("  claude context", "dim")
-        lines.append(_content_row(mode_label, w))
+        lines.append(content_row(mode_label, w))
 
-        lines.append(_content_row(Text(""), w))
+        lines.append(content_row(Text(""), w))
 
         if has_claude:
             opt_f = Text()
@@ -369,7 +357,7 @@ def _render_create_panel(
             opt_f.append("]", "dim")
             opt_f.append(" fork", "")
             opt_f.append("      carry full session", "dim")
-            lines.append(_content_row(opt_f, w))
+            lines.append(content_row(opt_f, w))
 
             opt_s = Text()
             opt_s.append("  [", "dim")
@@ -377,7 +365,7 @@ def _render_create_panel(
             opt_s.append("]", "dim")
             opt_s.append(" summary", "")
             opt_s.append("   seed with summary", "dim")
-            lines.append(_content_row(opt_s, w))
+            lines.append(content_row(opt_s, w))
 
         opt_c = Text()
         opt_c.append("  [", "dim")
@@ -388,15 +376,15 @@ def _render_create_panel(
             opt_c.append("     no Claude context", "dim")
         else:
             opt_c.append("     start fresh", "dim")
-        lines.append(_content_row(opt_c, w))
+        lines.append(content_row(opt_c, w))
 
         if not has_claude:
-            lines.append(_content_row(Text(""), w))
+            lines.append(content_row(Text(""), w))
             no_claude = Text()
             no_claude.append("  no active Claude session", "dim italic")
-            lines.append(_content_row(no_claude, w))
+            lines.append(content_row(no_claude, w))
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Separator ──
     sep = Text()
@@ -427,7 +415,7 @@ def _render_create_panel(
     centered = Text()
     centered.append(" " * left_pad)
     centered.append_text(hint)
-    lines.append(_content_row(centered, w))
+    lines.append(content_row(centered, w))
 
     # ── Bottom border ──
     bot = Text()
@@ -439,81 +427,78 @@ def _render_create_panel(
     return lines
 
 
-def _run_create_flow(console: Console, project_name: str, git_root: str) -> tuple[str, str] | None:
+def _run_create_flow(
+    fd: int, renderer: FrameRenderer, width: int, project_name: str, git_root: str
+) -> tuple[str, str] | None:
     """Interactive create flow. Returns (name, context_mode) or None on cancel.
 
-    Only shows fork/summary options when an active Claude session exists
-    for this project.
+    Runs inside the caller's raw-mode screen. Only shows fork/summary options
+    when an active Claude session exists for this project.
     """
     from kata.core.config import get_project_config_path
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
     buf: list[str] = []
+    message: str | None = None
 
     # Detect if Claude is active for this project
     has_claude = _has_claude_session(git_root) and _config_has_claude(
         get_project_config_path(git_root)
     )
 
-    try:
-        tty.setraw(fd)
+    def _paint(step: str, buf_str: str, msg: str | None = None) -> None:
+        frame = renderer.render(
+            _render_create_panel(project_name, buf_str, step, width, has_claude, msg)
+        )
+        sys.stdout.write("\x1b[H")
+        sys.stdout.write(frame)
+        sys.stdout.flush()
 
-        # ── Step 1: branch name ──
-        while True:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-            console.clear()
-            panel = _render_create_panel(
-                project_name, "".join(buf), "name", console.width, has_claude
-            )
-            for i, line in enumerate(panel):
-                if i < len(panel) - 1:
-                    console.print(line)
-                else:
-                    console.print(line, end="")
-            tty.setraw(fd)
-
-            ch = os.read(fd, 1)
-            if ch == b"\x1b":
-                return None
-            elif ch == b"\x03":
-                return None
-            elif ch in (b"\r", b"\n"):
-                if buf:
-                    break
-            elif ch in (b"\x7f", b"\x08"):
-                if buf:
-                    buf.pop()
-            elif ch.isascii() and ch >= b" ":
-                buf.append(ch.decode("utf-8", errors="replace"))
-
-        name = "".join(buf).strip().replace(" ", "-")
-
-        # ── Step 2: context mode ──
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        console.clear()
-        panel = _render_create_panel(project_name, name, "context", console.width, has_claude)
-        for i, line in enumerate(panel):
-            if i < len(panel) - 1:
-                console.print(line)
-            else:
-                console.print(line, end="")
-        tty.setraw(fd)
-
-        ch = os.read(fd, 1)
-        if ch == b"\x1b" or ch == b"\x03":
+    # ── Step 1: branch name ──
+    _paint("name", "")
+    while True:
+        key = read_key(fd)
+        if key == "escape":
             return None
+        elif key == "enter":
+            candidate = "".join(buf).strip()
+            if not candidate:
+                message = "branch name cannot be empty"
+                _paint("name", "".join(buf), message)
+                continue
+            break
+        elif key == "backspace":
+            if buf:
+                buf.pop()
+            message = None
+            _paint("name", "".join(buf), message)
+        elif key == "space":
+            buf.append(" ")
+            message = None
+            _paint("name", "".join(buf), message)
+        elif key in ("up", "down", "left", "right", "tab", "shift+tab"):
+            # Ignore navigation keys during text entry — they must not cancel
+            # the flow nor leak escape bytes into the next read.
+            continue
+        elif len(key) == 1 and key.isprintable():
+            buf.append(key)
+            message = None
+            _paint("name", "".join(buf), message)
 
-        if has_claude:
-            mode_map = {b"f": "fork", b"s": "summary", b"c": "fresh"}
-        else:
-            mode_map = {b"c": "fresh"}
-        context_mode = mode_map.get(ch, "fresh")
+    name = "".join(buf).strip().replace(" ", "-")
 
-        return name, context_mode
+    # ── Step 2: context mode ──
+    _paint("context", name)
+    key = read_key(fd)
+    if key == "escape":
+        return None
 
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    if has_claude:
+        mode_map = {"f": "fork", "s": "summary", "c": "fresh"}
+    else:
+        mode_map = {"c": "fresh"}
+    context_mode = mode_map.get(key, "fresh")
+
+    return name, context_mode
 
 
 # ── Loading panel ───────────────────────────────────────────────────────
@@ -541,24 +526,24 @@ def _render_loading_panel(
     top.append("╮", "dim")
     lines.append(top)
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Branch name ──
     branch = Text()
     branch.append(f"  {_ICON_BRANCH} ", "dim")
     branch.append(wt_name, "bold")
-    lines.append(_content_row(branch, w))
+    lines.append(content_row(branch, w))
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Spinner + status ──
     frame = _SPINNER_FRAMES[spinner_frame % len(_SPINNER_FRAMES)]
     spinner = Text()
     spinner.append(f"  {frame} ", "cyan")
     spinner.append(status, "dim")
-    lines.append(_content_row(spinner, w))
+    lines.append(content_row(spinner, w))
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Bottom border ──
     bot = Text()
@@ -571,7 +556,8 @@ def _render_loading_panel(
 
 
 def _run_full_create_with_spinner(
-    console: Console,
+    renderer: FrameRenderer,
+    width: int,
     project_name: str,
     git_root: str,
     name: str,
@@ -580,7 +566,12 @@ def _run_full_create_with_spinner(
     create_fn,
     refresh_fn,
 ) -> None:
-    """Run full worktree creation + seed + switch with animated spinner."""
+    """Run full worktree creation + seed + switch with animated spinner.
+
+    Runs inside the caller's raw-mode screen; frames are painted with a
+    home-cursor repaint rather than clear+print so nothing flickers and no
+    traceback vanishes with the popup on failure (the caller surfaces it).
+    """
     import threading
     import time
 
@@ -638,13 +629,10 @@ def _run_full_create_with_spinner(
     worker.start()
 
     while not done.is_set():
-        console.clear()
-        panel = _render_loading_panel(project_name, name, status_text, frame[0], console.width)
-        for i, line in enumerate(panel):
-            if i < len(panel) - 1:
-                console.print(line)
-            else:
-                console.print(line, end="")
+        panel = _render_loading_panel(project_name, name, status_text, frame[0], width)
+        sys.stdout.write("\x1b[H")
+        sys.stdout.write(renderer.render(panel))
+        sys.stdout.flush()
         frame[0] += 1
         time.sleep(WORKTREE_SPINNER_INTERVAL)
 
@@ -987,10 +975,12 @@ def open_worktree_popup() -> None:
     """Calculate content size and spawn a fitted tmux popup."""
     pane_path = _get_current_project_path()
     if not pane_path:
+        _display_message("kata: not in a git repository")
         return
 
     git_root = _find_git_root(pane_path)
     if not git_root:
+        _display_message("kata: not in a git repository")
         return
 
     from kata.services.worktrees import list_worktrees
@@ -1036,16 +1026,16 @@ def run_worktree_strip() -> None:
     )
     from kata.utils.claude_sessions import get_current_session_id, get_session_summary
 
-    console = Console()
+    guard_tty()
 
     pane_path = _get_current_project_path()
     if not pane_path:
-        console.print("[dim]Not in a project.[/dim]")
+        print("kata: not in a project", file=sys.stderr)
         return
 
     git_root = _find_git_root(pane_path)
     if not git_root:
-        console.print("[dim]Not a git repository.[/dim]")
+        print("kata: not in a git repository", file=sys.stderr)
         return
 
     project_name = Path(git_root).name
@@ -1066,15 +1056,17 @@ def run_worktree_strip() -> None:
 
     worktrees = _refresh()
 
-    # Reorder: move current worktree to position 1 (Alt+Tab style)
-    # so pressing Ctrl+W once selects the previous worktree
+    # Reorder: move the current worktree to position 1 (Alt+Tab style) so
+    # pressing Ctrl+W once selects the previous worktree. Never displace main
+    # from index 0 — rendering keeps it pinned at the top regardless, but
+    # keeping it at 0 also keeps the selection math intuitive.
     if current_wt and len(worktrees) > 1:
         current_idx = None
         for i, wt in enumerate(worktrees):
             if wt.info.name == current_wt or wt.info.branch == current_wt:
                 current_idx = i
                 break
-        if current_idx is not None and current_idx != 1:
+        if current_idx is not None and current_idx != 1 and not worktrees[current_idx].is_main:
             current_item = worktrees.pop(current_idx)
             worktrees.insert(1, current_item)
 
@@ -1082,18 +1074,32 @@ def run_worktree_strip() -> None:
     confirmed = False
 
     try:
-        while True:
-            console.clear()
-            panel = render_worktree_panel(
-                worktrees, selected, project_name, console.width, current_wt
-            )
-            for i, line in enumerate(panel):
-                if i < len(panel) - 1:
-                    console.print(line)
-                else:
-                    console.print(line, end="")
+        w = os.get_terminal_size().columns
+    except OSError:
+        w, _ = _calc_worktree_popup_size(worktrees, project_name)
 
-            key = _read_key()
+    renderer = FrameRenderer(w)
+
+    def _paint() -> None:
+        frame = renderer.render(
+            render_worktree_panel(worktrees, selected, project_name, w, current_wt)
+        )
+        sys.stdout.write("\x1b[H")
+        sys.stdout.write(frame)
+        sys.stdout.flush()
+
+    def _show_and_wait(fd: int, msg: str, *, style: str = "31") -> str:
+        """Clear, show a one-line message, and block for a keypress."""
+        sys.stdout.write("\x1b[2J\x1b[H")
+        sys.stdout.write(f"\r\n  \x1b[{style}m{msg}\x1b[0m\r\n")
+        sys.stdout.flush()
+        return read_key(fd)
+
+    with raw_screen() as fd:
+        _paint()
+
+        while True:
+            key = read_key(fd)
 
             if key in ("ctrl+w", "down", "j"):
                 selected = (selected + 1) % len(worktrees) if worktrees else 0
@@ -1105,7 +1111,7 @@ def run_worktree_strip() -> None:
                     break
             elif key == "n":
                 # ── Create new worktree ──
-                result = _run_create_flow(console, project_name, git_root)
+                result = _run_create_flow(fd, renderer, w, project_name, git_root)
                 if result:
                     name, context_mode = result
                     try:
@@ -1118,7 +1124,8 @@ def run_worktree_strip() -> None:
                             )
 
                         _run_full_create_with_spinner(
-                            console=console,
+                            renderer=renderer,
+                            width=w,
                             project_name=project_name,
                             git_root=git_root,
                             name=name,
@@ -1130,9 +1137,13 @@ def run_worktree_strip() -> None:
                         return
 
                     except WorktreeError as e:
-                        console.clear()
-                        console.print(f"  [red]error:[/red] {e}")
-                        _read_key()
+                        # Friendly, expected failure (bad name, git conflict, …).
+                        _show_and_wait(fd, f"error: {e}")
+                    except Exception as e:  # noqa: BLE001
+                        # SessionError / OSError / YAML errors etc. would
+                        # otherwise dump a traceback that vanishes with the
+                        # popup. Show it and wait so the user can read it.
+                        _show_and_wait(fd, f"worktree creation failed: {e}")
 
                 worktrees = _refresh()
                 selected = min(selected, len(worktrees) - 1) if worktrees else 0
@@ -1142,34 +1153,37 @@ def run_worktree_strip() -> None:
                     wt_name = worktrees[selected].info.name
                     force = key == "D"
                     try:
-                        delete_worktree(git_root, wt_name, force=force)
+                        warning = delete_worktree(git_root, wt_name, force=force)
                         worktrees = _refresh()
                         selected = min(selected, len(worktrees) - 1) if worktrees else 0
+                        if warning:
+                            # Worktree removed but its branch could not be
+                            # deleted — surface the warning.
+                            _show_and_wait(fd, warning, style="33")
                     except WorktreeError as e:
-                        # Show error with option to force delete
-                        console.clear()
-                        err_msg = str(e)
-                        out_fd = sys.stdout.fileno()
-                        os.write(
-                            out_fd,
-                            f"\r\n  \x1b[31merror:\x1b[0m {err_msg}\r\n\r\n"
-                            f"  \x1b[36mD\x1b[0m force delete   "
-                            f"\x1b[2many other key to cancel\x1b[0m\r\n".encode(),
+                        # Offer force delete.
+                        retry_key = _show_and_wait(
+                            fd,
+                            f"error: {e}\r\n\r\n  \x1b[36mD\x1b[0m force delete   "
+                            "\x1b[2many other key to cancel\x1b[0m",
                         )
-                        retry_key = _read_key()
                         if retry_key == "D":
                             try:
-                                delete_worktree(git_root, wt_name, force=True)
+                                warning = delete_worktree(git_root, wt_name, force=True)
                                 worktrees = _refresh()
                                 selected = min(selected, len(worktrees) - 1) if worktrees else 0
-                            except WorktreeError:
-                                pass  # Give up silently
+                                if warning:
+                                    _show_and_wait(fd, warning, style="33")
+                            except WorktreeError as e2:
+                                _show_and_wait(fd, f"force delete failed: {e2}")
 
             elif key in ("q", "escape"):
                 break
 
-    finally:
-        console.clear()
+            else:
+                continue
+
+            _paint()
 
     if confirmed and worktrees:
         _switch_to_worktree(git_root, project_name, worktrees[selected])

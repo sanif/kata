@@ -9,18 +9,14 @@ Architecture:
 """
 
 import os
-import select as _sel
 import subprocess
 import sys
-import termios
-import tty
 from dataclasses import dataclass
 from datetime import datetime
-from io import StringIO
 
-from rich.console import Console
 from rich.text import Text
 
+from kata.cli._termui import FrameRenderer, guard_tty, raw_screen, read_key
 from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.services.notifications.models import (
     Notification,
@@ -101,6 +97,7 @@ def render_panel(
     content_rows: int,
     focus: str = "left",  # "left" or "right"
     notif_cursor: int = 0,  # cursor in right column
+    message: str | None = None,  # transient inline status (e.g. dead session)
 ) -> list[Text]:
     w = _PANEL_W
     lines: list[Text] = []
@@ -338,18 +335,21 @@ def render_panel(
     bsep.append("┤", "dim")
     lines.append(bsep)
 
-    # ── Hint bar ──
+    # ── Hint bar (or transient message) ──
     hint = Text()
-    hint.append(" ↵", "cyan")
-    hint.append(" switch", "dim")
-    hint.append("  d", "cyan")
-    hint.append(" dismiss", "dim")
-    hint.append("  r", "cyan")
-    hint.append(" read", "dim")
-    hint.append("  R", "cyan")
-    hint.append(" all read", "dim")
-    hint.append("  esc", "cyan")
-    hint.append(" quit", "dim")
+    if message:
+        hint.append(message, "bold yellow")
+    else:
+        hint.append(" ↵", "cyan")
+        hint.append(" switch", "dim")
+        hint.append("  d", "cyan")
+        hint.append(" dismiss", "dim")
+        hint.append("  r", "cyan")
+        hint.append(" read", "dim")
+        hint.append("  R", "cyan")
+        hint.append(" all read", "dim")
+        hint.append("  esc", "cyan")
+        hint.append(" quit", "dim")
     avail = w - 4
     left_pad = max(0, (avail - len(hint.plain)) // 2)
     hline = Text()
@@ -372,40 +372,30 @@ def render_panel(
     return lines
 
 
-# ── Input ───────────────────────────────────────────────────────────────
+# ── Session helpers ─────────────────────────────────────────────────────
 
 
-def _read_key(fd: int) -> str:
-    ch = os.read(fd, 1)
-    if ch == b"\x1b":
-        r, _, _ = _sel.select([fd], [], [], 0.1)
-        if r:
-            seq = os.read(fd, 8)
-            if seq in (b"[A", b"OA"):
-                return "up"
-            elif seq in (b"[B", b"OB"):
-                return "down"
-            elif seq in (b"[C", b"OC"):
-                return "right"
-            elif seq in (b"[D", b"OD"):
-                return "left"
-            return "escape"
-        return "escape"
-    elif ch in (b"\r", b"\n"):
-        return "enter"
-    elif ch == b" ":
-        return "space"
-    elif ch == b"\x03":
-        return "escape"
-    elif ch == b"d":
-        return "dismiss"
-    elif ch == b"D":
-        return "dismiss_all"
-    elif ch == b"r":
-        return "read"
-    elif ch == b"R":
-        return "read_all"
-    return ch.decode("utf-8", errors="replace")
+def _resolve_live_session(session_name: str) -> str | None:
+    """Return the live tmux session target for a notification's session name.
+
+    Notifications store the raw project/session name; tmux may have created it
+    under a sanitized name. Try the sanitized form first, then the raw name,
+    and return whichever is actually live (or None if the session is gone).
+    """
+    from kata.utils.paths import sanitize_session_name
+
+    for candidate in (sanitize_session_name(session_name), session_name):
+        try:
+            result = subprocess.run(
+                ["tmux", "has-session", "-t", candidate],
+                capture_output=True,
+                timeout=SUBPROCESS_TIMEOUT,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+        if result.returncode == 0:
+            return candidate
+    return None
 
 
 # ── Popup launcher ──────────────────────────────────────────────────────
@@ -467,6 +457,7 @@ def _reload_state():
 
 def run_notify_popup() -> None:
     """Run the interactive notification popup inside tmux."""
+    guard_tty()
     grouped, projects, total_unread = _reload_state()
 
     cursor = 0
@@ -482,36 +473,33 @@ def run_notify_popup() -> None:
             return grouped.get(projects[cursor].session_name, [])
         return []
 
-    fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
-    buf_console = Console(file=StringIO(), force_terminal=True, width=_PANEL_W)
+    message: str | None = None
+    switch_target: str | None = None
+    renderer = FrameRenderer(_PANEL_W)
 
     def _render() -> str:
-        panel = render_panel(
-            projects,
-            cursor,
-            total_unread,
-            grouped,
-            content_rows,
-            focus=focus,
-            notif_cursor=notif_cursor,
+        return renderer.render(
+            render_panel(
+                projects,
+                cursor,
+                total_unread,
+                grouped,
+                content_rows,
+                focus=focus,
+                notif_cursor=notif_cursor,
+                message=message,
+            )
         )
-        buf = buf_console.file
-        buf.seek(0)
-        buf.truncate()
-        for line in panel:
-            buf_console.print(line, end="")
-            buf.write("\r\n")
-        return buf.getvalue()
 
-    try:
-        tty.setraw(fd)
-        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+    with raw_screen() as fd:
         sys.stdout.write(_render())
         sys.stdout.flush()
 
         while True:
-            key = _read_key(fd)
+            key = read_key(fd)
+            # Any keypress clears a transient message.
+            if message is not None and key != "enter":
+                message = None
 
             if key == "up":
                 if focus == "left":
@@ -541,9 +529,22 @@ def run_notify_popup() -> None:
                 if focus == "right":
                     focus = "left"
             elif key == "enter":
+                if not projects:
+                    continue
+                session = projects[cursor].session_name
+                target = _resolve_live_session(session)
+                if target is None:
+                    # Dead session: tell the user inline instead of closing
+                    # silently, and do NOT mark its notifications read.
+                    message = f"  session '{session}' is no longer running"
+                    sys.stdout.write("\x1b[H")
+                    sys.stdout.write(_render())
+                    sys.stdout.flush()
+                    continue
+                switch_target = target
                 confirmed = True
                 break
-            elif key == "dismiss":
+            elif key == "d":
                 if focus == "right":
                     # Dismiss single notification
                     notifs = _get_notifs()
@@ -576,7 +577,7 @@ def run_notify_popup() -> None:
                     if cursor >= len(projects):
                         cursor = max(0, len(projects) - 1)
                     notif_cursor = 0
-            elif key == "dismiss_all":
+            elif key == "D":
                 try:
                     with NotificationStore() as store:
                         store.dismiss_all()
@@ -588,7 +589,7 @@ def run_notify_popup() -> None:
                 cursor = 0
                 notif_cursor = 0
                 focus = "left"
-            elif key == "read":
+            elif key == "r":
                 if focus == "right":
                     # Mark single notification read
                     notifs = _get_notifs()
@@ -615,7 +616,7 @@ def run_notify_popup() -> None:
                     content_rows = min(content_rows, term_h - 6)
                     if cursor >= len(projects):
                         cursor = max(0, len(projects) - 1)
-            elif key == "read_all":
+            elif key == "R":
                 try:
                     with NotificationStore() as store:
                         store.mark_all_read()
@@ -635,19 +636,17 @@ def run_notify_popup() -> None:
             sys.stdout.write("\x1b[H")
             sys.stdout.write(_render())
             sys.stdout.flush()
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-        sys.stdout.write("\x1b[?25h\x1b[2J\x1b[H")
-        sys.stdout.flush()
 
-    if confirmed and projects:
+    if confirmed and projects and switch_target:
         session_name = projects[cursor].session_name
-        try:
-            with NotificationStore() as store:
-                store.mark_session_read(session_name)
-        except Exception:
-            pass
-        subprocess.run(
-            ["tmux", "switch-client", "-t", session_name],
+        # Switch first; only mark read if the switch succeeded.
+        result = subprocess.run(
+            ["tmux", "switch-client", "-t", switch_target],
             capture_output=True,
         )
+        if result.returncode == 0:
+            try:
+                with NotificationStore() as store:
+                    store.mark_session_read(session_name)
+            except Exception:
+                pass

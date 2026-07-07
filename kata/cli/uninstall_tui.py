@@ -5,21 +5,32 @@ Detects what kata installed and lets the user choose what to remove.
 """
 
 import json
-import os
 import re
-import select
 import shutil
 import subprocess
 import sys
-import termios
-import tty
 from dataclasses import dataclass, field
-from io import StringIO
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
 
+from kata.cli._termui import (
+    FrameRenderer,
+    content_row,
+    guard_tty,
+    has_kata_hooks,
+    raw_screen,
+    read_key,
+)
+from kata.cli._tmux_bindings import (
+    BINDING_LINES,
+    FENCE_END,
+    FENCE_START,
+    LEGACY_MARKER,
+    tmux_conf_path,
+)
 from kata.core.constants import SUBPROCESS_TIMEOUT
 
 # ── Data model ───────────────────────────────────────────────────────────
@@ -42,21 +53,6 @@ class UninstallGroup:
 
 
 # ── Detection ────────────────────────────────────────────────────────────
-
-
-def _has_kata_hooks(settings_path: Path) -> bool:
-    if not settings_path.exists():
-        return False
-    try:
-        data = json.loads(settings_path.read_text())
-        for event_hooks in data.get("hooks", {}).values():
-            for entry in event_hooks:
-                for h in entry.get("hooks", []):
-                    if "kata notify" in h.get("command", ""):
-                        return True
-    except Exception:
-        pass
-    return False
 
 
 def _has_codex_notify(config_path: Path) -> bool:
@@ -124,12 +120,13 @@ def _detect_items() -> list[UninstallGroup]:
     gemini_path = Path.home() / ".gemini" / "settings.json"
     codex_path = Path.home() / ".codex" / "config.toml"
 
-    claude_ok = _has_kata_hooks(claude_path)
-    gemini_ok = _has_kata_hooks(gemini_path)
+    claude_ok = has_kata_hooks(claude_path)
+    gemini_ok = has_kata_hooks(gemini_path)
     codex_ok = _has_codex_notify(codex_path)
     switcher_ok = _has_tmux_binding("switch-strip")
     notify_ok = _has_tmux_binding("notify-popup")
     detach_ok = _has_tmux_binding("C-q") and _has_tmux_binding("detach")
+    worktree_ok = _has_tmux_binding("worktree-strip")
 
     config_dir = Path.home() / ".config" / "kata"
     config_exists = config_dir.exists()
@@ -194,6 +191,14 @@ def _detect_items() -> list[UninstallGroup]:
                 checked=detach_ok,
                 found=detach_ok,
             ),
+            UninstallItem(
+                "worktree",
+                "Ctrl+W worktree manager",
+                "found" if worktree_ok else "not configured",
+                "Tmux Keybindings",
+                checked=worktree_ok,
+                found=worktree_ok,
+            ),
         ],
     )
 
@@ -251,17 +256,6 @@ def _detect_items() -> list[UninstallGroup]:
 # ── Rendering ────────────────────────────────────────────────────────────
 
 
-def _content_row(content: Text, width: int) -> Text:
-    plain_len = len(content.plain)
-    pad = max(0, width - 4 - plain_len)
-    t = Text()
-    t.append("│ ", "dim")
-    t.append_text(content)
-    t.append(" " * pad)
-    t.append(" │", "dim")
-    return t
-
-
 def render_uninstall_panel(
     groups: list[UninstallGroup],
     cursor: int,
@@ -282,17 +276,17 @@ def render_uninstall_panel(
     top.append("╮", "dim")
     lines.append(top)
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Groups & items ──
     flat_idx = 0
     for gi, group in enumerate(groups):
         if gi > 0:
-            lines.append(_content_row(Text(""), w))
+            lines.append(content_row(Text(""), w))
 
         header = Text()
         header.append(f"  {group.name}", "bold")
-        lines.append(_content_row(header, w))
+        lines.append(content_row(header, w))
 
         for item in group.items:
             is_selected = flat_idx == cursor
@@ -329,11 +323,11 @@ def render_uninstall_panel(
 
                 entry.append(f"  {item.description}", "dim")
 
-            lines.append(_content_row(entry, w))
+            lines.append(content_row(entry, w))
             flat_idx += 1
 
     # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Separator ──
     sep = Text()
@@ -360,7 +354,7 @@ def render_uninstall_panel(
     centered = Text()
     centered.append(" " * left_pad)
     centered.append_text(hint)
-    lines.append(_content_row(centered, w))
+    lines.append(content_row(centered, w))
 
     # ── Bottom border ──
     bot = Text()
@@ -370,33 +364,6 @@ def render_uninstall_panel(
     lines.append(bot)
 
     return lines
-
-
-# ── Input ────────────────────────────────────────────────────────────────
-
-
-def _read_key(fd: int) -> str:
-    """Read a single keypress from a file descriptor already in raw mode."""
-    ch = os.read(fd, 1)
-    if ch == b"\x1b":
-        r, _, _ = select.select([fd], [], [], 0.1)
-        if r:
-            seq = os.read(fd, 8)
-            if seq in (b"[A", b"OA"):
-                return "up"
-            elif seq in (b"[B", b"OB"):
-                return "down"
-            return "escape"
-        return "escape"
-    elif ch in (b"\r", b"\n"):
-        return "enter"
-    elif ch == b" ":
-        return "space"
-    elif ch == b"\x03":
-        return "escape"
-    elif ch == b"a":
-        return "a"
-    return ch.decode("utf-8", errors="replace")
 
 
 # ── Removal logic ────────────────────────────────────────────────────────
@@ -449,38 +416,82 @@ def _remove_codex_hooks(config_path: Path) -> bool:
         return False
 
 
-def _remove_tmux_lines(keywords: list[str]) -> bool:
-    """Remove lines containing any of the keywords from ~/.tmux.conf."""
-    tmux_conf = Path.home() / ".tmux.conf"
-    if not tmux_conf.exists():
-        return False
+def _backup_tmux_conf(original: str) -> Path | None:
+    """Write a timestamped backup of ~/.tmux.conf before we modify it."""
+    conf = tmux_conf_path()
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = conf.with_name(f"{conf.name}.kata-backup-{ts}")
     try:
-        lines = tmux_conf.read_text().splitlines(keepends=True)
-        filtered = [line for line in lines if not any(kw in line for kw in keywords)]
-
-        # Also remove orphaned marker lines (marker with no kata lines following)
-        marker = "# Kata workspace orchestrator"
-        cleaned: list[str] = []
-        for i, line in enumerate(filtered):
-            if marker in line:
-                # Check if any remaining lines reference kata
-                remaining = filtered[i + 1 :]
-                has_kata = any("kata" in r for r in remaining)
-                if not has_kata:
-                    continue  # Drop orphaned marker
-            cleaned.append(line)
-
-        # Remove trailing blank lines
-        content = "".join(cleaned).rstrip("\n")
-        if content:
-            content += "\n"
-
-        if len(cleaned) != len(lines):
-            tmux_conf.write_text(content)
-            return True
-        return False
+        backup.write_text(original)
+        return backup
     except Exception:
-        return False
+        return None
+
+
+def _strip_empty_fence(lines: list[str]) -> list[str]:
+    """Drop kata's fence markers when the block between them is empty."""
+    if FENCE_START not in lines or FENCE_END not in lines:
+        return lines
+    start = lines.index(FENCE_START)
+    # Find the matching end after start.
+    try:
+        end = lines.index(FENCE_END, start + 1)
+    except ValueError:
+        return lines
+    inner = lines[start + 1 : end]
+    if all(not ln.strip() for ln in inner):
+        return lines[:start] + lines[end + 1 :]
+    return lines
+
+
+def _strip_orphan_legacy_marker(lines: list[str]) -> list[str]:
+    """Drop a legacy kata marker that no longer precedes any kata line."""
+    cleaned: list[str] = []
+    for i, line in enumerate(lines):
+        if LEGACY_MARKER in line:
+            if not any("kata" in r for r in lines[i + 1 :]):
+                continue
+        cleaned.append(line)
+    return cleaned
+
+
+def _remove_tmux_bindings(keys: list[str]) -> tuple[bool, Path | None]:
+    """Remove kata's exact keybinding lines for ``keys`` from ~/.tmux.conf.
+
+    Only lines that *exactly* match what kata's setup writes are removed, so a
+    user's own bindings on the same keys (e.g. ``bind-key C-q send-prefix``)
+    survive. Handles both the fenced block (current installs) and legacy
+    marker-delimited lines. Writes a timestamped backup before any change.
+
+    Returns ``(changed, backup_path)``.
+    """
+    conf = tmux_conf_path()
+    if not conf.exists():
+        return False, None
+    try:
+        original = conf.read_text()
+    except Exception:
+        return False, None
+
+    lines = original.splitlines()
+    remove_exact = {ln.strip() for k in keys for ln in BINDING_LINES.get(k, [])}
+
+    kept = [ln for ln in lines if ln.strip() not in remove_exact]
+    kept = _strip_empty_fence(kept)
+    kept = _strip_orphan_legacy_marker(kept)
+
+    if kept == lines:
+        return False, None
+
+    backup = _backup_tmux_conf(original)
+    content = "\n".join(kept).rstrip("\n")
+    if content:
+        content += "\n"
+    try:
+        conf.write_text(content)
+    except Exception:
+        return False, backup
+    return True, backup
 
 
 def _unbind_tmux_key(key: str) -> None:
@@ -505,13 +516,20 @@ def _stop_daemon() -> bool:
         return False
 
 
-def _remove_config_dir() -> bool:
-    """Remove ~/.config/kata directory."""
+def _remove_config_dir() -> tuple[bool, str | None]:
+    """Remove ~/.config/kata directory.
+
+    Returns ``(removed, error)`` — never raises, so a permission error reports
+    cleanly instead of tearing down the uninstaller with a traceback.
+    """
     config_dir = Path.home() / ".config" / "kata"
-    if config_dir.exists():
+    if not config_dir.exists():
+        return False, None
+    try:
         shutil.rmtree(config_dir)
-        return True
-    return False
+        return True, None
+    except OSError as e:
+        return False, str(e)
 
 
 def _remove_project_configs() -> int:
@@ -600,21 +618,27 @@ def _apply_removals(groups: list[UninstallGroup], console: Console) -> None:
             console.print("[dim]  Codex CLI hooks — nothing to remove[/dim]")
 
     # ── Tmux keybindings ──
-    tmux_keywords: list[str] = []
+    tmux_keys: list[str] = []
     if selected.get("switcher"):
-        tmux_keywords.extend(["switch-strip", "C-Space", "C-S-Space"])
+        tmux_keys.append("switcher")
         _unbind_tmux_key("C-Space")
         _unbind_tmux_key("C-S-Space")
     if selected.get("notify"):
-        tmux_keywords.extend(["notify-popup"])
+        tmux_keys.append("notify")
         _unbind_tmux_key("C-n")
     if selected.get("detach"):
-        tmux_keywords.append("C-q")
+        tmux_keys.append("detach")
         _unbind_tmux_key("C-q")
+    if selected.get("worktree"):
+        tmux_keys.append("worktree")
+        _unbind_tmux_key("C-w")
 
-    if tmux_keywords:
-        if _remove_tmux_lines(tmux_keywords):
+    if tmux_keys:
+        changed, backup = _remove_tmux_bindings(tmux_keys)
+        if changed:
             console.print("[red]✗[/red] Removed tmux keybindings from ~/.tmux.conf")
+            if backup:
+                console.print(f"[dim]  Backup saved: {backup}[/dim]")
             removed += 1
         else:
             console.print("[dim]  Tmux keybindings — nothing to remove[/dim]")
@@ -636,9 +660,12 @@ def _apply_removals(groups: list[UninstallGroup], console: Console) -> None:
             console.print("[dim]  Project configs — none found[/dim]")
 
     if selected.get("config"):
-        if _remove_config_dir():
+        ok, error = _remove_config_dir()
+        if ok:
             console.print("[red]✗[/red] Removed ~/.config/kata")
             removed += 1
+        elif error:
+            console.print(f"[yellow]⚠[/yellow] Could not remove ~/.config/kata: {error}")
         else:
             console.print("[dim]  Config directory — not found[/dim]")
 
@@ -684,6 +711,7 @@ def _calc_panel_size(groups: list[UninstallGroup]) -> tuple[int, int]:
 
 def run_uninstall() -> None:
     """Run the interactive uninstall TUI."""
+    guard_tty()
     console = Console()
     groups = _detect_items()
 
@@ -699,28 +727,17 @@ def run_uninstall() -> None:
     confirmed = False
     w, h = _calc_panel_size(groups)
 
-    fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
-    buf_console = Console(file=StringIO(), force_terminal=True, width=w)
+    renderer = FrameRenderer(w)
 
     def _render_frame() -> str:
-        panel = render_uninstall_panel(groups, cursor, w)
-        buf = buf_console.file
-        buf.seek(0)
-        buf.truncate()
-        for line in panel:
-            buf_console.print(line, end="")
-            buf.write("\r\n")
-        return buf.getvalue()
+        return renderer.render(render_uninstall_panel(groups, cursor, w))
 
-    try:
-        tty.setraw(fd)
-        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+    with raw_screen() as fd:
         sys.stdout.write(_render_frame())
         sys.stdout.flush()
 
         while True:
-            key = _read_key(fd)
+            key = read_key(fd)
 
             if key == "up":
                 cursor = (cursor - 1) % len(flat_items)
@@ -743,10 +760,6 @@ def run_uninstall() -> None:
             sys.stdout.write("\x1b[H")
             sys.stdout.write(_render_frame())
             sys.stdout.flush()
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-        sys.stdout.write("\x1b[?25h\x1b[2J\x1b[H")
-        sys.stdout.flush()
 
     if confirmed:
         any_selected = any(it.checked for it in flat_items)

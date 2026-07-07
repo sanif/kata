@@ -15,7 +15,7 @@ from kata.services.registry import (
 )
 from kata.services.sessions import (
     SessionError,
-    get_all_kata_sessions,
+    get_active_kata_sessions,
     get_current_tmux_session,
     get_session_status,
     kill_session,
@@ -175,14 +175,15 @@ def launch(
         raise typer.Exit(1)
 
     try:
-        # Record that we opened this project
-        project.record_open()
-        registry.update(project)
-
         launch_or_attach(project)
     except SessionError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+    # Record the open only after a successful launch so a failed launch does
+    # not corrupt recency ordering.
+    project.record_open()
+    registry.update(project)
 
 
 @app.command()
@@ -211,9 +212,11 @@ def kill(
     registry = get_registry()
 
     if all_sessions:
-        # Get all sessions that correspond to registered projects
-        registered_names = {p.name for p in registry.list_all()}
-        active_sessions = [name for name in get_all_kata_sessions() if name in registered_names]
+        # Match live sessions by *sanitized* name so dotted/colon project names
+        # line up with what tmux created, and an unrelated personal session that
+        # merely shares a project's raw name is never killed.
+        registered_names = [p.name for p in registry.list_all()]
+        active_sessions = get_active_kata_sessions(registered_names)
 
         if not active_sessions:
             console.print("[dim]No active Kata sessions to kill.[/dim]")
@@ -361,15 +364,23 @@ def scan(
         elif selection.lower() == "all":
             selected_indices = list(range(len(new_projects)))
         else:
-            try:
-                selected_indices = [int(x.strip()) - 1 for x in selection.split(",")]
-                # Validate indices
-                for idx in selected_indices:
-                    if idx < 0 or idx >= len(new_projects):
-                        raise ValueError(f"Invalid index: {idx + 1}")
-            except ValueError as e:
-                console.print(f"[red]Error:[/red] Invalid selection: {e}")
-                raise typer.Exit(1)
+            selected_indices = []
+            for raw in selection.split(","):
+                token = raw.strip()
+                if not token:
+                    continue
+                try:
+                    number = int(token)
+                except ValueError:
+                    console.print(f"[red]Error:[/red] Invalid selection: '{token}' is not a number")
+                    raise typer.Exit(1)
+                if number < 1 or number > len(new_projects):
+                    console.print(
+                        f"[red]Error:[/red] Invalid selection: {number} is out of range "
+                        f"(1-{len(new_projects)})"
+                    )
+                    raise typer.Exit(1)
+                selected_indices.append(number - 1)
 
     # Import selected projects
     imported = 0
@@ -448,6 +459,7 @@ def edit(
 
     Uses $EDITOR, $VISUAL, or falls back to nano/vim/vi.
     """
+    import shlex
     import subprocess
 
     registry = get_registry()
@@ -466,11 +478,18 @@ def edit(
         raise typer.Exit(1)
 
     editor = _get_editor()
+    # Split so $EDITOR values with arguments work (e.g. "code --wait").
+    try:
+        editor_cmd = shlex.split(editor)
+    except ValueError:
+        editor_cmd = [editor]
+    if not editor_cmd:
+        editor_cmd = [editor]
     console.print(f"Opening [bold]{config_path}[/bold] with {editor}...")
 
     try:
         # Run editor synchronously
-        result = subprocess.run([editor, str(config_path)])
+        result = subprocess.run([*editor_cmd, str(config_path)])
         if result.returncode != 0:
             console.print(f"[yellow]Warning:[/yellow] Editor exited with code {result.returncode}")
     except FileNotFoundError:
@@ -810,16 +829,6 @@ def switch(
         "--zoxide-limit",
         help="Maximum number of zoxide entries to include",
     ),
-    list_only: bool = typer.Option(
-        False,
-        "--list",
-        help="Output items to stdout (for piping to fzf-tmux)",
-    ),
-    select: str | None = typer.Option(
-        None,
-        "--select",
-        help="Handle a selection from fzf-tmux (internal use)",
-    ),
 ) -> None:
     """Interactively switch to a project or directory using fzf.
 
@@ -832,32 +841,6 @@ def switch(
 
     Requires fzf to be installed. Zoxide integration is optional.
     """
-    # Handle --select mode (from fzf-tmux keybinding)
-    if select is not None:
-        if not select:
-            # Empty selection = user cancelled
-            raise typer.Exit(0)
-        try:
-            source_type, value = _parse_switch_selection(select)
-            _handle_switch_selection(source_type, value)
-        except ValueError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(1)
-        except ProjectNotFoundError:
-            console.print("[red]Error:[/red] Project not found")
-            raise typer.Exit(1)
-        except SessionError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(1)
-        return
-
-    # Handle --list mode (output items for piping to fzf-tmux)
-    if list_only:
-        items = _build_switch_items(include_zoxide=zoxide, zoxide_limit=zoxide_limit)
-        for item in items:
-            print(item)
-        return
-
     # Interactive mode: use fzf directly
     from kata.utils.fzf import is_fzf_available, run_fzf_picker
 
@@ -1093,17 +1076,14 @@ def migrate() -> None:
 @app.command("notifyd-start")
 def notifyd_start() -> None:
     """Start the notification daemon in the background."""
-    from kata.services.notifications.daemon import is_daemon_running, run_daemon
+    from kata.services.notifications.daemon import is_daemon_running, spawn_detached
 
     if is_daemon_running():
         console.print("[yellow]Notification daemon is already running.[/yellow]")
         return
 
-    import multiprocessing
-
-    p = multiprocessing.Process(target=run_daemon, daemon=True)
-    p.start()
-    console.print(f"[green]✓[/green] Notification daemon started (PID: {p.pid})")
+    pid = spawn_detached()
+    console.print(f"[green]✓[/green] Notification daemon started (PID: {pid})")
 
 
 @app.command("notifyd-stop")
@@ -1137,10 +1117,19 @@ def notifyd_status() -> None:
 
 @app.command("notifications")
 def notifications_cmd(
-    action: str = typer.Argument("list", help="list, unread, clear, dismiss-all"),
+    action: str = typer.Argument(
+        "list",
+        help="list, unread, clear (alias: dismiss-all)",
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max notifications to show"),
 ) -> None:
-    """View and manage notifications."""
+    """View and manage notifications.
+
+    Actions:
+        list         Show recent notifications (default)
+        unread       Show only unread notifications
+        clear        Dismiss all notifications (alias: dismiss-all)
+    """
     from kata.services.notifications.models import NotificationStatus
     from kata.services.notifications.store import get_notification_store
 
@@ -1201,7 +1190,8 @@ def notifications_cmd(
         console.print("[green]✓[/green] All notifications dismissed.")
 
     else:
-        console.print(f"[red]Unknown action: {action}[/red]")
+        console.print(f"[red]Error:[/red] Unknown action: {action}")
+        console.print("Valid actions: list, unread, clear (alias: dismiss-all)")
         raise typer.Exit(1)
 
 
@@ -1235,6 +1225,15 @@ def notify_hook(
     """Handle Claude Code, Gemini CLI, or Codex hook events."""
     import sys
 
+    # Invoked by AI-tool hooks, which pipe JSON on stdin. Run interactively it
+    # would block forever on stdin.read(); fail fast with a hint instead.
+    if sys.stdin.isatty() and not payload:
+        console.print(
+            "[red]Error:[/red] notify-hook is invoked by AI tool hooks; "
+            "it reads a JSON event from stdin."
+        )
+        raise typer.Exit(1)
+
     stdin_data = sys.stdin.read()
     if not stdin_data.strip() and payload:
         stdin_data = payload
@@ -1249,29 +1248,31 @@ def notify_hook(
 
         handle_gemini(event_type, stdin_data)
     elif event_type == "notification":
-        # Can be either, but let's check for Gemini fields
+        # The "notification" event name is shared by Claude Code and Gemini;
+        # the payload shape disambiguates them.
         import json
+
+        from kata.services.notifications.hooks.claude_code import (
+            handle_hook_event as handle_claude,
+        )
 
         try:
             data = json.loads(stdin_data)
-            if "hook_event_name" in data:
+            from kata.services.notifications.hooks.common import (
+                identify_notification_source,
+            )
+            from kata.services.notifications.models import NotificationSource
+
+            if identify_notification_source(data) == NotificationSource.GEMINI:
                 from kata.services.notifications.hooks.gemini import (
                     handle_hook_event as handle_gemini,
                 )
 
                 handle_gemini(event_type, stdin_data)
             else:
-                from kata.services.notifications.hooks.claude_code import (
-                    handle_hook_event as handle_claude,
-                )
-
                 handle_claude(event_type, stdin_data)
         except Exception:
-            # Fallback to Claude
-            from kata.services.notifications.hooks.claude_code import (
-                handle_hook_event as handle_claude,
-            )
-
+            # Fallback to Claude on malformed payloads.
             handle_claude(event_type, stdin_data)
     else:
         # stop, subagent-stop, pre-tool-use
@@ -1298,8 +1299,26 @@ def uninstall() -> None:
     run_uninstall()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from kata import __version__
+
+        console.print(f"kata {__version__}")
+        raise typer.Exit(0)
+
+
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show the kata version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
     """Kata - Terminal-centric workspace orchestrator for tmux.
 
     Run without arguments to open the TUI dashboard.

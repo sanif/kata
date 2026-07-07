@@ -3,21 +3,23 @@
 Shows all integrations as a toggleable checklist with arrow/space navigation.
 """
 
-import json
-import os
-import select
 import shutil
 import subprocess
-import sys
-import termios
-import tty
 from dataclasses import dataclass, field
-from io import StringIO
 from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
 
+from kata.cli._termui import (
+    FrameRenderer,
+    content_row,
+    guard_tty,
+    has_kata_hooks,
+    raw_screen,
+    read_key,
+)
+from kata.cli._tmux_bindings import BINDING_LINES, install_tmux_lines
 from kata.core.constants import SUBPROCESS_TIMEOUT
 
 # ── Data model ───────────────────────────────────────────────────────────
@@ -40,21 +42,6 @@ class SetupGroup:
 
 
 # ── Detection ────────────────────────────────────────────────────────────
-
-
-def _has_kata_hooks(settings_path: Path) -> bool:
-    if not settings_path.exists():
-        return False
-    try:
-        data = json.loads(settings_path.read_text())
-        for event_hooks in data.get("hooks", {}).values():
-            for entry in event_hooks:
-                for h in entry.get("hooks", []):
-                    if "kata notify" in h.get("command", ""):
-                        return True
-    except Exception:
-        pass
-    return False
 
 
 def _has_codex_notify(config_path: Path) -> bool:
@@ -113,8 +100,8 @@ def _detect_items() -> list[SetupGroup]:
     gemini_settings = Path.home() / ".gemini" / "settings.json"
     codex_settings = Path.home() / ".codex" / "config.toml"
 
-    claude_ok = _has_kata_hooks(claude_settings)
-    gemini_ok = _has_kata_hooks(gemini_settings)
+    claude_ok = has_kata_hooks(claude_settings)
+    gemini_ok = has_kata_hooks(gemini_settings)
     codex_ok = _has_codex_notify(codex_settings)
     tn_ok = shutil.which("terminal-notifier") is not None
     switcher_ok = _has_tmux_switcher()
@@ -158,7 +145,7 @@ def _detect_items() -> list[SetupGroup]:
             SetupItem(
                 "switcher",
                 "Ctrl+Space",
-                "project switcher",
+                "project switcher (overrides C-Space editor set-mark)",
                 "Tmux Bindings",
                 checked=switcher_ok,
                 configured=switcher_ok,
@@ -166,7 +153,7 @@ def _detect_items() -> list[SetupGroup]:
             SetupItem(
                 "notify",
                 "Ctrl+N",
-                "notification popup",
+                "notification popup (overrides C-n readline history / next-line)",
                 "Tmux Bindings",
                 checked=notify_ok,
                 configured=notify_ok,
@@ -174,7 +161,7 @@ def _detect_items() -> list[SetupGroup]:
             SetupItem(
                 "detach",
                 "Ctrl+Q",
-                "detach session",
+                "detach session (overrides C-q terminal resume / XON)",
                 "Tmux Bindings",
                 checked=detach_ok,
                 configured=detach_ok,
@@ -182,7 +169,7 @@ def _detect_items() -> list[SetupGroup]:
             SetupItem(
                 "worktree",
                 "Ctrl+W",
-                "worktree manager",
+                "worktree manager (overrides C-w readline delete-word)",
                 "Tmux Bindings",
                 checked=worktree_ok,
                 configured=worktree_ok,
@@ -210,17 +197,6 @@ def _detect_items() -> list[SetupGroup]:
 # ── Rendering ────────────────────────────────────────────────────────────
 
 
-def _content_row(content: Text, width: int) -> Text:
-    plain_len = len(content.plain)
-    pad = max(0, width - 4 - plain_len)
-    t = Text()
-    t.append("│ ", "dim")
-    t.append_text(content)
-    t.append(" " * pad)
-    t.append(" │", "dim")
-    return t
-
-
 def render_setup_panel(
     groups: list[SetupGroup],
     cursor: int,
@@ -241,18 +217,18 @@ def render_setup_panel(
     top.append("╮", "dim")
     lines.append(top)
 
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Groups & items ──
     flat_idx = 0
     for gi, group in enumerate(groups):
         if gi > 0:
-            lines.append(_content_row(Text(""), w))
+            lines.append(content_row(Text(""), w))
 
         # Group header
         header = Text()
         header.append(f"  {group.name}", "bold")
-        lines.append(_content_row(header, w))
+        lines.append(content_row(header, w))
 
         for item in group.items:
             is_selected = flat_idx == cursor
@@ -287,11 +263,11 @@ def render_setup_panel(
 
                 entry.append(f"  {item.description}", "dim")
 
-            lines.append(_content_row(entry, w))
+            lines.append(content_row(entry, w))
             flat_idx += 1
 
     # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Separator ──
     sep = Text()
@@ -318,7 +294,7 @@ def render_setup_panel(
     centered = Text()
     centered.append(" " * left_pad)
     centered.append_text(hint)
-    lines.append(_content_row(centered, w))
+    lines.append(content_row(centered, w))
 
     # ── Bottom border ──
     bot = Text()
@@ -328,44 +304,6 @@ def render_setup_panel(
     lines.append(bot)
 
     return lines
-
-
-# ── Input ────────────────────────────────────────────────────────────────
-
-
-def _read_key(fd: int) -> str:
-    """Read a single keypress from a file descriptor already in raw mode."""
-    ch = os.read(fd, 1)
-    if ch == b"\x00":
-        return "ctrl+space"
-    elif ch == b"\x1b":
-        r, _, _ = select.select([fd], [], [], 0.1)
-        if r:
-            seq = os.read(fd, 8)
-            if seq == b"[A":
-                return "up"
-            elif seq == b"[B":
-                return "down"
-            elif seq == b"[Z":
-                return "shift+tab"
-            elif seq.startswith(b"O"):
-                if seq == b"OA":
-                    return "up"
-                elif seq == b"OB":
-                    return "down"
-            return "escape"
-        return "escape"
-    elif ch in (b"\r", b"\n"):
-        return "enter"
-    elif ch == b" ":
-        return "space"
-    elif ch == b"\t":
-        return "tab"
-    elif ch == b"\x03":
-        return "escape"
-    elif ch == b"a":
-        return "a"
-    return ch.decode("utf-8", errors="replace")
 
 
 # ── Apply logic ──────────────────────────────────────────────────────────
@@ -417,112 +355,71 @@ def _apply_selections(groups: list[SetupGroup], console: Console) -> None:
                 setup_hooks as setup_codex,
             )
 
-            setup_codex()
-            console.print("[green]✓[/green] Codex CLI hook configured")
+            status = setup_codex()
+            if status == "existing_notify_preserved":
+                console.print(
+                    "[yellow]⚠[/yellow] Codex CLI: your existing [bold]notify[/bold] "
+                    "command was preserved — kata was NOT installed over it. "
+                    "Remove it from ~/.codex/config.toml first to enable kata notifications."
+                )
+            elif status == "already_installed":
+                console.print("[dim]  Codex CLI hook — already configured[/dim]")
+            else:
+                console.print("[green]✓[/green] Codex CLI hook configured")
             applied += 1
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Codex CLI hook: {e}")
 
-    # Ctrl+Space switcher
-    if selected.get("switcher"):
-        tmux_conf = Path.home() / ".tmux.conf"
-        marker = "# Kata workspace orchestrator"
-        try:
-            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
-            if "switch-strip" not in existing:
-                with tmux_conf.open("a") as f:
-                    if marker not in existing:
-                        f.write(f"\n{marker}\n")
-                    f.write('bind-key -n C-Space run-shell -b "kata switch-strip"\n')
-                    f.write(
-                        "bind-key -n C-S-Space run-shell -b " '"kata switch-strip --backward"\n'
-                    )
-            # Apply to current session
-            subprocess.run(
-                ["tmux", "bind-key", "-n", "C-Space", "run-shell", "-b", "kata switch-strip"],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            subprocess.run(
-                [
-                    "tmux",
-                    "bind-key",
-                    "-n",
-                    "C-S-Space",
-                    "run-shell",
-                    "-b",
-                    "kata switch-strip --backward",
-                ],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            console.print("[green]✓[/green] Ctrl+Space / Ctrl+Shift+Space switcher")
-            applied += 1
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Switcher binding: {e}")
+    # ── Tmux keybindings ──
+    # Live-apply commands per binding key (argv lists for the current session).
+    live_binds: dict[str, list[list[str]]] = {
+        "switcher": [
+            ["tmux", "bind-key", "-n", "C-Space", "run-shell", "-b", "kata switch-strip"],
+            [
+                "tmux",
+                "bind-key",
+                "-n",
+                "C-S-Space",
+                "run-shell",
+                "-b",
+                "kata switch-strip --backward",
+            ],
+        ],
+        "notify": [
+            ["tmux", "bind-key", "-n", "C-n", "run-shell", "-b", "kata notify-popup"],
+        ],
+        "detach": [
+            ["tmux", "bind-key", "-n", "C-q", "detach-client"],
+        ],
+        "worktree": [
+            ["tmux", "bind-key", "-n", "C-w", "run-shell", "-b", "kata worktree-strip"],
+        ],
+    }
+    bind_labels = {
+        "switcher": "Ctrl+Space / Ctrl+Shift+Space switcher",
+        "notify": "Ctrl+N notification popup",
+        "detach": "Ctrl+Q detach session",
+        "worktree": "Ctrl+W worktree manager",
+    }
 
-    # Ctrl+N notification popup
-    if selected.get("notify"):
-        tmux_conf = Path.home() / ".tmux.conf"
-        marker = "# Kata workspace orchestrator"
+    conf_lines_to_add: list[str] = []
+    for key in ("switcher", "notify", "detach", "worktree"):
+        if not selected.get(key):
+            continue
         try:
-            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
-            if "notify-popup" not in existing:
-                with tmux_conf.open("a") as f:
-                    if marker not in existing:
-                        f.write(f"\n{marker}\n")
-                    f.write('bind-key -n C-n run-shell -b "kata notify-popup"\n')
-            subprocess.run(
-                ["tmux", "bind-key", "-n", "C-n", "run-shell", "-b", "kata notify-popup"],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            console.print("[green]✓[/green] Ctrl+N notification popup")
+            conf_lines_to_add.extend(BINDING_LINES[key])
+            for argv in live_binds[key]:
+                subprocess.run(argv, capture_output=True, timeout=SUBPROCESS_TIMEOUT)
+            console.print(f"[green]✓[/green] {bind_labels[key]}")
             applied += 1
         except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Notification binding: {e}")
+            console.print(f"[yellow]⚠[/yellow] {bind_labels[key]}: {e}")
 
-    # Ctrl+Q detach
-    if selected.get("detach"):
-        tmux_conf = Path.home() / ".tmux.conf"
-        marker = "# Kata workspace orchestrator"
+    if conf_lines_to_add:
         try:
-            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
-            if "C-q" not in existing or "detach" not in existing:
-                with tmux_conf.open("a") as f:
-                    if marker not in existing:
-                        f.write(f"\n{marker}\n")
-                    f.write("bind-key -n C-q detach-client\n")
-            subprocess.run(
-                ["tmux", "bind-key", "-n", "C-q", "detach-client"],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            console.print("[green]✓[/green] Ctrl+Q detach session")
-            applied += 1
+            install_tmux_lines(conf_lines_to_add)
         except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Detach binding: {e}")
-
-    # Ctrl+W worktree
-    if selected.get("worktree"):
-        tmux_conf = Path.home() / ".tmux.conf"
-        marker = "# Kata workspace orchestrator"
-        try:
-            existing = tmux_conf.read_text() if tmux_conf.exists() else ""
-            if "worktree-strip" not in existing:
-                with tmux_conf.open("a") as f:
-                    if marker not in existing:
-                        f.write(f"\n{marker}\n")
-                    f.write('bind-key -n C-w run-shell -b "kata worktree-strip"\n')
-            subprocess.run(
-                ["tmux", "bind-key", "-n", "C-w", "run-shell", "-b", "kata worktree-strip"],
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-            )
-            console.print("[green]✓[/green] Ctrl+W worktree manager")
-            applied += 1
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Worktree binding: {e}")
+            console.print(f"[yellow]⚠[/yellow] Writing ~/.tmux.conf: {e}")
 
     # terminal-notifier
     if selected.get("terminal-notifier"):
@@ -542,7 +439,7 @@ def _apply_selections(groups: list[SetupGroup], console: Console) -> None:
                     applied += 1
                 else:
                     console.print(
-                        f"[yellow]⚠[/yellow] brew install failed: " f"{result.stderr.strip()}"
+                        f"[yellow]⚠[/yellow] brew install failed: {result.stderr.strip()}"
                     )
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] terminal-notifier: {e}")
@@ -591,6 +488,9 @@ def _calc_panel_size(groups: list[SetupGroup]) -> tuple[int, int]:
 
 def run_setup() -> None:
     """Run the interactive setup TUI."""
+    import sys
+
+    guard_tty()
     console = Console()
     groups = _detect_items()
 
@@ -607,31 +507,17 @@ def run_setup() -> None:
     confirmed = False
     w, h = _calc_panel_size(groups)
 
-    fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
-    # Use a string-buffer console to render Rich Text to ANSI strings
-    buf_console = Console(file=StringIO(), force_terminal=True, width=w)
+    renderer = FrameRenderer(w)
 
     def _render_frame() -> str:
-        """Render panel lines into a single raw-mode-safe string."""
-        panel = render_setup_panel(groups, cursor, w)
-        buf = buf_console.file
-        buf.seek(0)
-        buf.truncate()
-        for line in panel:
-            buf_console.print(line, end="")
-            buf.write("\r\n")
-        return buf.getvalue()
+        return renderer.render(render_setup_panel(groups, cursor, w))
 
-    try:
-        tty.setraw(fd)
-        # Hide cursor, clear screen, position at top
-        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+    with raw_screen() as fd:
         sys.stdout.write(_render_frame())
         sys.stdout.flush()
 
         while True:
-            key = _read_key(fd)
+            key = read_key(fd)
 
             if key in ("up", "shift+tab"):
                 cursor = (cursor - 1) % len(flat_items)
@@ -655,10 +541,6 @@ def run_setup() -> None:
             sys.stdout.write("\x1b[H")
             sys.stdout.write(_render_frame())
             sys.stdout.flush()
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-        sys.stdout.write("\x1b[?25h\x1b[2J\x1b[H")  # Show cursor, clear
-        sys.stdout.flush()
 
     if confirmed:
         any_selected = any(it.checked for it in flat_items)

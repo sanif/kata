@@ -13,15 +13,18 @@ Architecture:
                → `kata switch-strip --popup` (interactive UI inside popup)
 """
 
-import os
 import subprocess
 import sys
-import termios
-import tty
 
-from rich.console import Console
 from rich.text import Text
 
+from kata.cli._termui import (
+    FrameRenderer,
+    content_row,
+    guard_tty,
+    raw_screen,
+    read_key,
+)
 from kata.core.constants import SUBPROCESS_TIMEOUT
 from kata.core.models import SessionStatus
 from kata.services.registry import get_registry
@@ -31,6 +34,23 @@ from kata.services.sessions import (
 )
 from kata.utils.colors import resolve_color
 from kata.utils.paths import sanitize_session_name
+
+
+def _display_message(msg: str) -> None:
+    """Surface a one-line status in the tmux status bar.
+
+    The popup launchers are invoked via ``run-shell`` where stdout is invisible,
+    so a bare ``print`` would make the keybinding look dead when a precondition
+    (no sessions / not a git repo) is not met.
+    """
+    try:
+        subprocess.run(
+            ["tmux", "display-message", msg],
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
 
 
 def _tmux_session_exists(session_name: str) -> bool:
@@ -104,18 +124,6 @@ _STATUS = {
 }
 
 
-def _content_row(content: Text, width: int) -> Text:
-    """Wrap content in box side borders, padding to full width."""
-    plain_len = len(content.plain)
-    pad = max(0, width - 4 - plain_len)
-    t = Text()
-    t.append("│ ", "dim")
-    t.append_text(content)
-    t.append(" " * pad)
-    t.append(" │", "dim")
-    return t
-
-
 def render_panel(
     projects, statuses, selected_index, current_session=None, term_width: int = 40
 ) -> list[Text]:
@@ -135,7 +143,7 @@ def render_panel(
     lines.append(top)
 
     # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Project rows ──
     for i, project in enumerate(projects):
@@ -180,10 +188,10 @@ def render_panel(
             entry.append(dot_char, dot_color)
             entry.append(f" {project.name}")
 
-        lines.append(_content_row(entry, w))
+        lines.append(content_row(entry, w))
 
     # ── Spacer ──
-    lines.append(_content_row(Text(""), w))
+    lines.append(content_row(Text(""), w))
 
     # ── Separator ──
     sep = Text()
@@ -206,7 +214,7 @@ def render_panel(
     centered_hint = Text()
     centered_hint.append(" " * left_pad)
     centered_hint.append_text(hint)
-    lines.append(_content_row(centered_hint, w))
+    lines.append(content_row(centered_hint, w))
 
     # ── Bottom border ──
     bot = Text()
@@ -230,98 +238,7 @@ def _calc_popup_size(projects):
     return w, h
 
 
-# Keep for backward compatibility with tests
-def render_strip(
-    projects, statuses, selected_index, current_session=None, term_width: int = 80
-) -> Text:
-    """Render the project strip as a Rich Text object (horizontal)."""
-    n = len(projects)
-    if n > 0:
-        available = term_width - 4
-        per_project = available // n - 7
-        max_name = max(8, min(20, per_project))
-    else:
-        max_name = 20
-
-    text = Text()
-    for i, project in enumerate(projects):
-        sname = sanitize_session_name(project.name)
-        status = statuses.get(sname, SessionStatus.IDLE)
-        dot_char, dot_color = _STATUS[status]
-
-        if i > 0:
-            text.append("  │  ", "dim")
-
-        display_name = project.name[:max_name]
-        is_current = current_session and (
-            project.name == current_session or sname == current_session
-        )
-
-        if i == selected_index:
-            text.append(f" {dot_char} ", f"bold {dot_color}")
-            text.append(display_name, "bold reverse")
-            text.append(" ", "bold reverse")
-        elif is_current:
-            text.append(f" {dot_char} ", dot_color)
-            text.append(display_name, "dim italic")
-            text.append(" ")
-        else:
-            text.append(f" {dot_char} ", dot_color)
-            text.append(display_name)
-            text.append(" ")
-
-    return text
-
-
 # ── Input ────────────────────────────────────────────────────────────────
-
-
-def _read_key() -> str:
-    """Read a single keypress in raw terminal mode, blocking."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = os.read(fd, 1)
-        if ch == b"\x00":
-            return "ctrl+space"
-        elif ch == b"\x1b":
-            import select as _sel
-
-            # Read rest of escape sequence — be generous with timeout
-            r, _, _ = _sel.select([fd], [], [], 0.1)
-            if r:
-                seq = os.read(fd, 8)  # read all available bytes at once
-                if seq == b"[A":
-                    return "up"
-                elif seq == b"[B":
-                    return "down"
-                elif seq == b"[C":
-                    return "right"
-                elif seq == b"[D":
-                    return "left"
-                elif seq == b"[Z":
-                    return "shift+tab"
-                elif seq.startswith(b"O"):
-                    # SS3 arrow keys (some terminals)
-                    if seq == b"OA":
-                        return "up"
-                    elif seq == b"OB":
-                        return "down"
-                # Unknown escape sequence — treat as escape
-                return "escape"
-            return "escape"
-        elif ch in (b"\r", b"\n"):
-            return "enter"
-        elif ch == b" ":
-            return "space"
-        elif ch == b"\t":
-            return "tab"
-        elif ch == b"\x03":
-            return "escape"
-        return ch.decode("utf-8", errors="replace")
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 # ── Popup launcher ──────────────────────────────────────────────────────
@@ -337,6 +254,7 @@ def open_switcher_popup(backward: bool = False) -> None:
     projects = _get_active_projects(registry, statuses, current)
 
     if not projects:
+        _display_message("kata: no active sessions")
         return
 
     w, h = _calc_popup_size(projects)
@@ -371,7 +289,7 @@ def run_switch_strip(backward: bool = False) -> None:
     Args:
         backward: If True, start cycling from the end.
     """
-    console = Console()
+    guard_tty()
     registry = get_registry()
     registry.reload()
 
@@ -380,23 +298,24 @@ def run_switch_strip(backward: bool = False) -> None:
     projects = _get_active_projects(registry, statuses, current)
 
     if not projects:
-        console.print("[dim]No active sessions.[/dim]")
+        print("kata: no active sessions", file=sys.stderr)
         return
 
+    w, _ = _calc_popup_size(projects)
     selected = 0 if not backward else len(projects) - 1
     confirmed = False
 
-    try:
-        while True:
-            console.clear()
-            panel = render_panel(projects, statuses, selected, current, console.width)
-            for i, line in enumerate(panel):
-                if i < len(panel) - 1:
-                    console.print(line)
-                else:
-                    console.print(line, end="")
+    renderer = FrameRenderer(w)
 
-            key = _read_key()
+    def _render_frame() -> str:
+        return renderer.render(render_panel(projects, statuses, selected, current, w))
+
+    with raw_screen() as fd:
+        sys.stdout.write(_render_frame())
+        sys.stdout.flush()
+
+        while True:
+            key = read_key(fd)
 
             if key in ("ctrl+space", "down", "tab"):
                 selected = (selected + 1) % len(projects)
@@ -407,8 +326,12 @@ def run_switch_strip(backward: bool = False) -> None:
                 break
             elif key == "escape":
                 break
-    finally:
-        console.clear()
+            else:
+                continue
+
+            sys.stdout.write("\x1b[H")
+            sys.stdout.write(_render_frame())
+            sys.stdout.flush()
 
     if confirmed:
         _switch_to_session(projects[selected], registry)

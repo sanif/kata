@@ -3,13 +3,13 @@
 import json
 from unittest.mock import patch
 
+from kata.cli._termui import has_kata_hooks
 from kata.cli.uninstall_tui import (
     _has_codex_notify,
-    _has_kata_hooks,
     _has_tmux_binding,
     _remove_codex_hooks,
     _remove_kata_hooks_from_json,
-    _remove_tmux_lines,
+    _remove_tmux_bindings,
 )
 
 
@@ -29,15 +29,15 @@ class TestDetection:
                 }
             )
         )
-        assert _has_kata_hooks(settings) is True
+        assert has_kata_hooks(settings) is True
 
     def test_has_kata_hooks_false(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text(json.dumps({"hooks": {}}))
-        assert _has_kata_hooks(settings) is False
+        assert has_kata_hooks(settings) is False
 
     def test_has_kata_hooks_no_file(self, tmp_path):
-        assert _has_kata_hooks(tmp_path / "nope.json") is False
+        assert has_kata_hooks(tmp_path / "nope.json") is False
 
     def test_has_codex_notify_true(self, tmp_path):
         config = tmp_path / "config.toml"
@@ -112,20 +112,76 @@ class TestRemoval:
         assert "model" in after
         assert "other" in after
 
-    def test_remove_tmux_lines(self, tmp_path):
+
+class TestRemoveTmuxBindings:
+    """Exact-line / fence-aware removal of kata's tmux keybindings."""
+
+    def test_removes_fenced_block(self, tmp_path):
+        tmux_conf = tmp_path / ".tmux.conf"
+        tmux_conf.write_text(
+            "set -g default-terminal screen-256color\n"
+            "\n"
+            "# >>> kata keybindings >>>\n"
+            'bind-key -n C-Space run-shell -b "kata switch-strip"\n'
+            'bind-key -n C-S-Space run-shell -b "kata switch-strip --backward"\n'
+            'bind-key -n C-n run-shell -b "kata notify-popup"\n'
+            "# <<< kata keybindings <<<\n"
+        )
+        with patch("kata.cli._tmux_bindings.Path.home", return_value=tmp_path):
+            changed, backup = _remove_tmux_bindings(["switcher", "notify"])
+            assert changed is True
+
+            after = tmux_conf.read_text()
+            assert "switch-strip" not in after
+            assert "notify-popup" not in after
+            # Fence markers dropped once the block is empty.
+            assert "kata keybindings" not in after
+            assert "screen-256color" in after  # user's line preserved
+            # A timestamped backup was written.
+            assert backup is not None and backup.exists()
+
+    def test_preserves_user_own_binding_on_same_key(self, tmp_path):
+        """A user's own C-q binding must survive uninstalling kata's detach."""
+        tmux_conf = tmp_path / ".tmux.conf"
+        tmux_conf.write_text(
+            "# >>> kata keybindings >>>\n"
+            "bind-key -n C-q detach-client\n"
+            "# <<< kata keybindings <<<\n"
+            "bind-key -n C-q send-prefix\n"  # the user's own, different command
+        )
+        with patch("kata.cli._tmux_bindings.Path.home", return_value=tmp_path):
+            changed, _ = _remove_tmux_bindings(["detach"])
+            assert changed is True
+
+            after = tmux_conf.read_text()
+            # kata's exact line is gone…
+            assert "detach-client" not in after
+            # …but the user's own C-q binding survives.
+            assert "bind-key -n C-q send-prefix" in after
+
+    def test_removes_legacy_marker_lines(self, tmp_path):
         tmux_conf = tmp_path / ".tmux.conf"
         tmux_conf.write_text(
             "set -g default-terminal screen-256color\n"
             "# Kata workspace orchestrator\n"
             'bind-key -n C-Space run-shell -b "kata switch-strip"\n'
+            'bind-key -n C-S-Space run-shell -b "kata switch-strip --backward"\n'
             'bind-key -n C-n run-shell -b "kata notify-popup"\n'
         )
-        with patch("kata.cli.uninstall_tui.Path.home", return_value=tmp_path):
-            result = _remove_tmux_lines(["switch-strip", "notify-popup"])
-            assert result is True
+        with patch("kata.cli._tmux_bindings.Path.home", return_value=tmp_path):
+            changed, _ = _remove_tmux_bindings(["switcher", "notify"])
+            assert changed is True
 
             after = tmux_conf.read_text()
             assert "switch-strip" not in after
             assert "notify-popup" not in after
-            assert "Kata workspace" not in after  # Orphaned marker removed
-            assert "screen-256color" in after  # Non-kata lines preserved
+            assert "Kata workspace" not in after  # orphaned marker removed
+            assert "screen-256color" in after
+
+    def test_no_change_when_nothing_matches(self, tmp_path):
+        tmux_conf = tmp_path / ".tmux.conf"
+        tmux_conf.write_text("set -g mouse on\n")
+        with patch("kata.cli._tmux_bindings.Path.home", return_value=tmp_path):
+            changed, backup = _remove_tmux_bindings(["switcher"])
+            assert changed is False
+            assert backup is None

@@ -188,13 +188,41 @@ class TestKillCommand:
         runner.invoke(app, ["add", str(path1)])
         runner.invoke(app, ["add", str(path2)])
 
-        with patch("kata.cli.app.get_all_kata_sessions", return_value=["project1", "project2"]):
+        with patch("kata.cli.app.get_active_kata_sessions", return_value=["project1", "project2"]):
             with patch("kata.cli.app.get_session_status", return_value=SessionStatus.ACTIVE):
                 with patch("kata.cli.app.kill_session"):
                     result = runner.invoke(app, ["kill", "--all", "--force"])
 
         assert result.exit_code == 0
         assert "Killed 2 session(s)" in result.stdout
+
+    def test_kill_all_matches_sanitized_names(self, mock_registry, tmp_path):
+        """kill --all matches live sessions by sanitized name.
+
+        A dotted project name (`next.js`) is created as a sanitized tmux
+        session (`next-js`); kill --all must find and kill it. An unrelated
+        personal session that merely shares a raw name must not be killed.
+        """
+        proj = tmp_path / "next.js"
+        proj.mkdir()
+        runner.invoke(app, ["add", str(proj)])
+
+        killed = []
+
+        def fake_kill(name):
+            killed.append(name)
+
+        # Live sessions: the sanitized kata session plus an unrelated one.
+        live = {"next_js": SessionStatus.DETACHED, "my-personal": SessionStatus.ACTIVE}
+
+        with patch("kata.services.sessions.get_all_session_statuses", return_value=live):
+            with patch("kata.cli.app.get_session_status", return_value=SessionStatus.DETACHED):
+                with patch("kata.cli.app.kill_session", side_effect=fake_kill):
+                    result = runner.invoke(app, ["kill", "--all", "--force"])
+
+        assert result.exit_code == 0
+        # Only the sanitized kata session was killed, not the personal one.
+        assert killed == ["next_js"]
 
 
 class TestScanCommand:
@@ -288,3 +316,89 @@ class TestLaunchCommand:
             result = runner.invoke(app, ["launch", tmp_path.name])
 
         assert result.exit_code == 0
+
+    def test_launch_records_only_on_success(self, mock_registry, tmp_path):
+        """A failed launch must not record an open (recency stays clean)."""
+        from kata.services.sessions import SessionError
+
+        runner.invoke(app, ["add", str(tmp_path)])
+
+        with patch("kata.cli.app.launch_or_attach", side_effect=SessionError("boom")):
+            result = runner.invoke(app, ["launch", tmp_path.name])
+
+        assert result.exit_code == 1
+        from kata.services.registry import get_registry
+
+        project = get_registry().get(tmp_path.name)
+        assert project.times_opened == 0
+        assert project.last_opened is None
+
+
+class TestVersion:
+    """Tests for 'kata --version'."""
+
+    def test_version_flag(self):
+        result = runner.invoke(app, ["--version"])
+        assert result.exit_code == 0
+        assert "kata" in result.stdout
+
+
+class TestScanSelectionErrors:
+    """Friendly errors for bad 'kata scan' selections."""
+
+    def _two_projects(self, tmp_path):
+        for name in ("proj-a", "proj-b"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / ".git").mkdir()
+
+    def test_non_numeric_selection(self, mock_registry, tmp_path):
+        self._two_projects(tmp_path)
+        result = runner.invoke(app, ["scan", str(tmp_path)], input="x\n")
+        assert result.exit_code == 1
+        assert "Invalid selection: 'x' is not a number" in result.stdout
+
+    def test_out_of_range_selection(self, mock_registry, tmp_path):
+        self._two_projects(tmp_path)
+        result = runner.invoke(app, ["scan", str(tmp_path)], input="9\n")
+        assert result.exit_code == 1
+        assert "is out of range (1-2)" in result.stdout
+
+
+class TestNotifyHookRouting:
+    """`kata notify-hook notification` routes by payload shape."""
+
+    def test_routes_claude_payload_to_claude(self):
+        payload = json.dumps({"hook_event_name": "Notification", "message": "hi"})
+        with (
+            patch("kata.services.notifications.hooks.claude_code.handle_hook_event") as claude,
+            patch("kata.services.notifications.hooks.gemini.handle_hook_event") as gemini,
+        ):
+            result = runner.invoke(app, ["notify-hook", "notification"], input=payload)
+        assert result.exit_code == 0
+        claude.assert_called_once()
+        gemini.assert_not_called()
+
+    def test_routes_gemini_payload_to_gemini(self):
+        payload = json.dumps({"prompt_response": "the answer"})
+        with (
+            patch("kata.services.notifications.hooks.claude_code.handle_hook_event") as claude,
+            patch("kata.services.notifications.hooks.gemini.handle_hook_event") as gemini,
+        ):
+            result = runner.invoke(app, ["notify-hook", "notification"], input=payload)
+        assert result.exit_code == 0
+        gemini.assert_called_once()
+        claude.assert_not_called()
+
+
+class TestTtyGuard:
+    """Raw-mode entry points fail cleanly without a TTY (no traceback)."""
+
+    def test_setup_without_tty_exits_one(self):
+        # CliRunner's stdin/stdout are not TTYs.
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 1
+
+    def test_uninstall_without_tty_exits_one(self):
+        result = runner.invoke(app, ["uninstall"])
+        assert result.exit_code == 1
