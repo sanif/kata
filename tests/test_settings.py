@@ -2,6 +2,8 @@
 
 from dataclasses import fields as dataclass_fields
 
+import pytest
+
 from kata.core.settings import Settings
 
 
@@ -47,3 +49,28 @@ class TestSettings:
         assert s.notifications_volume == 1.0
         s = Settings(notifications_volume=-0.5)
         assert s.notifications_volume == 0.0
+
+
+class TestUpdateSettings:
+    """update_settings must reject unknown keys instead of silently ignoring."""
+
+    def test_unknown_key_raises(self, tmp_path, monkeypatch):
+        import kata.core.settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "SETTINGS_FILE", tmp_path / "settings.json")
+        monkeypatch.setattr(settings_mod, "KATA_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(settings_mod, "_settings", None)
+
+        with pytest.raises(ValueError, match="Unknown setting"):
+            settings_mod.update_settings(does_not_exist=True)
+
+    def test_known_key_persists(self, tmp_path, monkeypatch):
+        import kata.core.settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "SETTINGS_FILE", tmp_path / "settings.json")
+        monkeypatch.setattr(settings_mod, "KATA_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(settings_mod, "_settings", None)
+
+        updated = settings_mod.update_settings(refresh_interval=10)
+        assert updated.refresh_interval == 10
+        assert (tmp_path / "settings.json").exists()

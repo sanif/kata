@@ -87,7 +87,9 @@ def scan_directory(
 
         try:
             entries = list(current.iterdir())
-        except PermissionError:
+        except OSError:
+            # Permission denied, broken mount, too many symlinks, etc. — skip
+            # this directory rather than aborting the whole scan.
             return
 
         for entry in entries:

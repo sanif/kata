@@ -28,14 +28,29 @@ def _run_tmux(*args: str) -> str | None:
     return None
 
 
+def _window_targets(session_name: str) -> list[str]:
+    """Return ``session:index`` targets for every window in the session.
+
+    ``set-option -w -t <session>`` only affects the session's *current*
+    window, so per-project styling would silently apply to whichever window
+    happened to be active. Enumerate the windows and target each explicitly.
+    """
+    out = _run_tmux("list-windows", "-t", session_name, "-F", "#{window_index}")
+    if not out:
+        return []
+    return [f"{session_name}:{idx.strip()}" for idx in out.splitlines() if idx.strip()]
+
+
 def _set_window_option(session_name: str, option: str, value: str) -> None:
-    """Set a window option on all windows in a session."""
-    _run_tmux("set-option", "-w", "-t", session_name, option, value)
+    """Set a window option on every window in a session."""
+    for target in _window_targets(session_name):
+        _run_tmux("set-option", "-w", "-t", target, option, value)
 
 
 def _unset_window_option(session_name: str, option: str) -> None:
-    """Unset a window option on a session."""
-    _run_tmux("set-option", "-w", "-t", session_name, "-u", option)
+    """Unset a window option on every window in a session."""
+    for target in _window_targets(session_name):
+        _run_tmux("set-option", "-w", "-t", target, "-u", option)
 
 
 def _set_session_option(session_name: str, option: str, value: str) -> None:
@@ -90,8 +105,7 @@ def apply_project_color(session_name: str, color: str | None) -> None:
 
     # --- Accent line ---
     border_format = (
-        f"#[bg={color_str},fg=black,bold] #S #[default]"
-        f"#[fg={color_str}]" + "─" * 200 + "#[default]"
+        f"#[bg={color_str},fg=black,bold] #S #[default]#[fg={color_str}]" + "─" * 200 + "#[default]"
     )
 
     from kata.core.settings import get_settings

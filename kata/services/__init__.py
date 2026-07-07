@@ -26,6 +26,7 @@ from kata.services.sessions import (
     SessionError,
     SessionNotFoundError,
     attach_session,
+    get_active_kata_sessions,
     get_all_kata_sessions,
     get_session_status,
     is_inside_tmux,
@@ -33,6 +34,7 @@ from kata.services.sessions import (
     launch_or_attach,
     launch_session,
     session_exists,
+    session_name_for,
 )
 
 __all__ = [
@@ -50,6 +52,8 @@ __all__ = [
     "kill_session",
     "launch_or_attach",
     "get_all_kata_sessions",
+    "get_active_kata_sessions",
+    "session_name_for",
     "SessionError",
     "SessionNotFoundError",
     "ConfigNotFoundError",

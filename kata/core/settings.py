@@ -2,7 +2,10 @@
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
 from typing import Any
 
 from kata.core.config import KATA_CONFIG_DIR
@@ -44,7 +47,6 @@ class Settings:
     notifications_os_enabled: bool = True
     notifications_retention_days: int = 7
     notifications_max_count: int = 500
-    notifications_terminal_app: str = "auto"
 
     # Sound (new)
     notifications_sound_enabled: bool = True
@@ -172,18 +174,18 @@ def save_settings(settings: Settings) -> None:
     """
     KATA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    temp_file = SETTINGS_FILE.with_suffix(".tmp")
+    content = json.dumps(settings.to_dict(), indent=2) + "\n"
+    # Unique temp file (not a fixed ".tmp" name) so concurrent writers do not
+    # race on the same path; os.replace is atomic on POSIX.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(SETTINGS_FILE.parent), prefix=".settings-", suffix=".tmp"
+    )
     try:
-        with open(temp_file, "w") as f:
-            json.dump(settings.to_dict(), f, indent=2)
-            f.write("\n")  # Trailing newline
-
-        # Atomic rename
-        temp_file.rename(SETTINGS_FILE)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_name, SETTINGS_FILE)
     except Exception as e:
-        # Clean up temp file on failure
-        if temp_file.exists():
-            temp_file.unlink()
+        Path(tmp_name).unlink(missing_ok=True)
         raise RuntimeError(f"Failed to save settings: {e}") from e
 
 
@@ -206,9 +208,13 @@ def update_settings(**kwargs: Any) -> Settings:
     """
     settings = get_settings()
 
+    valid_fields = {f.name for f in fields(settings)}
+    unknown = [key for key in kwargs if key not in valid_fields]
+    if unknown:
+        raise ValueError(f"Unknown setting(s): {', '.join(sorted(unknown))}")
+
     for key, value in kwargs.items():
-        if hasattr(settings, key):
-            setattr(settings, key, value)
+        setattr(settings, key, value)
 
     # Re-validate after updates
     settings.__post_init__()

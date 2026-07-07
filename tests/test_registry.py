@@ -402,3 +402,66 @@ class TestRegistry:
         registry2 = Registry()
         assert "test-project" in registry2
         assert len(registry2) == 1
+
+
+class TestCorruptRegistry:
+    """The registry must never silently destroy the user's data."""
+
+    def test_corrupt_json_is_backed_up_and_not_wiped(self, temp_config_dir, tmp_path):
+        """A corrupt registry.json is preserved on load, not overwritten on save."""
+        original_bytes = b'{"version": "1.0", "projects": [ THIS IS NOT VALID JSON'
+        temp_config_dir.write_bytes(original_bytes)
+
+        # Loading the corrupt file should start empty (not raise) ...
+        registry = Registry()
+        assert len(registry) == 0
+
+        # ... and the corrupt file must have been moved aside, byte-for-byte.
+        backups = list(temp_config_dir.parent.glob(f"{temp_config_dir.name}.corrupt-*"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == original_bytes
+
+        # A subsequent save must write valid JSON without resurrecting the
+        # corrupt content.
+        path = tmp_path / "dir_recover"
+        path.mkdir()
+        registry.add(Project(name="recovered", path=str(path), group="Test"))
+
+        data = json.loads(temp_config_dir.read_text())
+        assert [p["name"] for p in data["projects"]] == ["recovered"]
+
+
+class TestConcurrentSaveMerge:
+    """_save reload-merges so a stale snapshot does not clobber other writers."""
+
+    def test_foreign_add_is_preserved_on_save(self, temp_config_dir, tmp_path):
+        """A project added by another process survives this instance's save."""
+        reg_a = Registry()
+        path_a = tmp_path / "a"
+        path_a.mkdir()
+        reg_a.add(Project(name="a", path=str(path_a), group="Test"))
+
+        # Another process adds "b" behind reg_a's back.
+        reg_b = Registry()
+        path_b = tmp_path / "b"
+        path_b.mkdir()
+        reg_b.add(Project(name="b", path=str(path_b), group="Test"))
+
+        # reg_a saves from its stale snapshot (only knows "a").
+        reg_a.get("a").record_open()
+        reg_a.update(reg_a.get("a"))
+
+        disk = json.loads(temp_config_dir.read_text())
+        names = {p["name"] for p in disk["projects"]}
+        assert names == {"a", "b"}
+
+    def test_local_delete_is_not_resurrected(self, temp_config_dir, tmp_path):
+        """A project this instance removed is not merged back from disk."""
+        reg = Registry()
+        path = tmp_path / "gone"
+        path.mkdir()
+        reg.add(Project(name="gone", path=str(path), group="Test"))
+        reg.remove("gone")
+
+        disk = json.loads(temp_config_dir.read_text())
+        assert disk["projects"] == []

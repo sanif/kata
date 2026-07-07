@@ -27,31 +27,38 @@ def _find_latest_session(session_dir: Path) -> Path | None:
 
 
 def _extract_last_assistant_text(session_file: Path) -> str | None:
-    """Extract the last assistant text message from a JSONL session file."""
+    """Extract the last assistant text message from a JSONL session file.
+
+    Streams the file line by line rather than reading it whole — Claude Code
+    session transcripts can grow to hundreds of MB, and loading one into a
+    single string would spike memory for a one-line summary.
+    """
     last_text = None
     try:
-        for line in session_file.read_text().strip().split("\n"):
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        with session_file.open(encoding="utf-8", errors="replace") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-            if entry.get("type") != "assistant":
-                continue
+                if entry.get("type") != "assistant":
+                    continue
 
-            message = entry.get("message", {})
-            content = message.get("content", "")
+                message = entry.get("message", {})
+                content = message.get("content", "")
 
-            if isinstance(content, str) and content.strip():
-                last_text = content.strip()
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "").strip()
-                        if text:
-                            last_text = text
+                if isinstance(content, str) and content.strip():
+                    last_text = content.strip()
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "").strip()
+                            if text:
+                                last_text = text
     except (OSError, UnicodeDecodeError):
         pass
     return last_text

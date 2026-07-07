@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -63,8 +64,42 @@ def _get_tmux_server() -> libtmux.Server | None:
         return None
 
 
+def session_name_for(project: Project) -> str:
+    """Resolve the tmux session name for a registered project.
+
+    Prefers the ``session_name:`` written in the project's .kata.yaml (so a
+    user-edited name is honoured) and falls back to the sanitized project name.
+    This is the single source of truth for launch, readiness polling, and
+    status matching — recomputing the name independently is what caused dotted
+    directories (e.g. ``next.js``) and edited names to never match.
+
+    Args:
+        project: The project to resolve a session name for
+
+    Returns:
+        The tmux session name tmuxp will actually create
+    """
+    config_path = get_project_config_path(project.path)
+    if config_path.exists():
+        try:
+            import yaml
+
+            data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                name = data.get("session_name")
+                if name:
+                    return str(name)
+        except Exception:
+            logger.debug("Failed to read session_name from %s", config_path, exc_info=True)
+    return sanitize_session_name(project.name)
+
+
 def session_exists(session_name: str) -> bool:
     """Check if a tmux session with the given name exists.
+
+    Uses a direct ``tmux has-session`` subprocess call rather than libtmux so
+    it works correctly inside the Textual TUI (libtmux misbehaves there due to
+    stdout/stderr capture). The ``=`` target prefix forces an exact-name match.
 
     Args:
         session_name: Name of the session to check
@@ -72,13 +107,17 @@ def session_exists(session_name: str) -> bool:
     Returns:
         True if session exists, False otherwise
     """
-    server = _get_tmux_server()
-    if server is None:
+    if not session_name:
         return False
-
     try:
-        return server.has_session(session_name)
-    except Exception:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", f"={session_name}"],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_SHORT,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return False
 
 
@@ -136,17 +175,42 @@ def get_all_session_statuses() -> dict[str, SessionStatus]:
         for line in result.stdout.strip().split("\n"):
             if not line or "|" not in line:
                 continue
-            parts = line.split("|")
-            if len(parts) >= 2:
-                name = parts[0]
-                attached = parts[1]
-                if attached and int(attached) > 0:
-                    statuses[name] = SessionStatus.ACTIVE
-                else:
-                    statuses[name] = SessionStatus.DETACHED
+            # Session names can themselves contain "|"; the attached count is
+            # always the final field, so split from the right. Skip only the
+            # offending line on a parse error instead of dropping the whole map.
+            name, _, attached = line.rpartition("|")
+            try:
+                is_attached = int(attached) > 0
+            except ValueError:
+                continue
+            statuses[name] = SessionStatus.ACTIVE if is_attached else SessionStatus.DETACHED
         return statuses
-    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return {}
+
+
+def get_active_kata_sessions(registry_names: list[str]) -> list[str]:
+    """Return live tmux session names that belong to registered projects.
+
+    Matches by *sanitized* session name so dotted/colon project names line up
+    with what tmux actually created, and — crucially — an unrelated personal
+    session that merely shares a project's raw name is never matched. Intended
+    for a future ``kata kill --all`` that must not kill sessions it didn't
+    create.
+
+    Args:
+        registry_names: Raw project names from the registry
+
+    Returns:
+        Sanitized session names that are currently live
+    """
+    live = set(get_all_session_statuses())
+    result: list[str] = []
+    for name in registry_names:
+        sanitized = sanitize_session_name(name)
+        if sanitized in live and sanitized not in result:
+            result.append(sanitized)
+    return result
 
 
 def is_inside_tmux() -> bool:
@@ -203,11 +267,14 @@ def launch_session(project: Project) -> None:
             ["tmuxp", "load", "-d", str(config_path)],
             capture_output=True,
             text=True,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         if result.returncode != 0:
             raise SessionError(f"Failed to launch session: {result.stderr}")
     except FileNotFoundError:
         raise SessionError("tmuxp not found. Please install tmuxp.")
+    except subprocess.TimeoutExpired:
+        raise SessionError("tmuxp load timed out")
 
 
 def _get_tmux_client() -> str | None:
@@ -302,7 +369,10 @@ def launch_or_attach(project: Project) -> None:
 
     from kata.services.tmux_style import apply_project_color
 
-    session_name = sanitize_session_name(project.name)
+    # Resolve the name tmuxp will actually create (honours an edited
+    # session_name: in .kata.yaml) so the existence check and readiness poll
+    # match the real session.
+    session_name = session_name_for(project)
     if session_exists(session_name):
         apply_project_color(session_name, project.color)
         attach_session(session_name)
@@ -317,7 +387,7 @@ def launch_or_attach(project: Project) -> None:
             time.sleep(SESSION_READY_POLL_INTERVAL)
 
         if not session_ready:
-            raise SessionError(f"Session '{project.name}' failed to start within timeout")
+            raise SessionError(f"Session '{session_name}' failed to start within timeout")
 
         apply_project_color(session_name, project.color)
         attach_session(session_name)
@@ -376,8 +446,10 @@ def launch_adhoc_session(directory: str, session_name: str | None = None) -> str
     if not directory_path.is_dir():
         raise SessionError(f"Directory not found: {directory}")
 
-    # Determine session name
-    base_name = session_name or directory_path.name
+    # Determine session name. Sanitize first so the name we poll for and return
+    # matches what tmux actually creates (tmuxp/tmux turn "." and ":" into "_");
+    # otherwise dotted directories like "next.js" never match on re-open.
+    base_name = sanitize_session_name(session_name or directory_path.name)
     final_name = _generate_unique_session_name(base_name)
 
     # Detect project type
@@ -403,6 +475,7 @@ def launch_adhoc_session(directory: str, session_name: str | None = None) -> str
                 ["tmuxp", "load", "-d", temp_path],
                 capture_output=True,
                 text=True,
+                timeout=SUBPROCESS_TIMEOUT,
             )
 
             if result.returncode != 0:
@@ -415,6 +488,8 @@ def launch_adhoc_session(directory: str, session_name: str | None = None) -> str
 
     except FileNotFoundError:
         raise SessionError("tmuxp not found. Please install tmuxp.")
+    except subprocess.TimeoutExpired:
+        raise SessionError("tmuxp load timed out")
 
 
 def launch_or_attach_adhoc(directory: str) -> None:
@@ -432,7 +507,9 @@ def launch_or_attach_adhoc(directory: str) -> None:
     import time
 
     directory_path = Path(directory).expanduser().resolve()
-    base_name = directory_path.name
+    # Match the sanitized name tmux actually uses so dotted directories resolve
+    # to the existing session instead of "session already exists" churn.
+    base_name = sanitize_session_name(directory_path.name)
 
     if session_exists(base_name):
         attach_session(base_name)
@@ -486,7 +563,12 @@ def _parse_command(full_args: str) -> str:
     if not full_args:
         return ""
 
-    parts = full_args.split()
+    # Use shlex so paths and arguments containing spaces survive round-tripping
+    # (a naive .split() would shred "/Some Path/bin/tool" into two tokens).
+    try:
+        parts = shlex.split(full_args)
+    except ValueError:
+        parts = full_args.split()
     if not parts:
         return ""
 
@@ -502,7 +584,7 @@ def _parse_command(full_args: str) -> str:
             script_name = script_name[:-3]
         # If it's nx, npx, npm, etc., include remaining args
         if script_name in ("nx", "npx", "npm", "yarn", "pnpm") and len(parts) > 2:
-            return f"{script_name} " + " ".join(parts[2:])
+            return f"{script_name} " + shlex.join(parts[2:])
         elif script_name in ("nx", "npx", "npm", "yarn", "pnpm"):
             return script_name
         else:
@@ -514,7 +596,7 @@ def _parse_command(full_args: str) -> str:
         script_path = parts[1]
         script_name = Path(script_path).name
         if len(parts) > 2:
-            return f"python {script_name} " + " ".join(parts[2:])
+            return f"python {script_name} " + shlex.join(parts[2:])
         return f"python {script_name}"
 
     # For other commands, just return the base command name
@@ -577,7 +659,12 @@ def get_session_layout(session_name: str) -> dict | None:
             if len(parts) < 3:
                 continue
 
-            window_index, window_name, window_layout = parts[0], parts[1], parts[2]
+            # Window names may contain "|"; index is the first field and the
+            # layout string (no "|") is the last, so the name is everything
+            # in between rejoined.
+            window_index = parts[0]
+            window_layout = parts[-1]
+            window_name = "|".join(parts[1:-1])
 
             # Get panes for this window (use pane_pid to find actual command)
             panes_result = subprocess.run(
@@ -675,7 +762,7 @@ def get_session_layout(session_name: str) -> dict | None:
             "windows": windows,
         }
 
-    except (subprocess.TimeoutExpired, Exception):
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError, ValueError):
         logger.debug("Failed to capture session layout for %s", session_name, exc_info=True)
         return None
 
@@ -699,7 +786,7 @@ def save_current_session_layout(project: Project) -> Path:
 
     from kata.core.templates import _base_template
 
-    session_name = sanitize_session_name(project.name)
+    session_name = session_name_for(project)
     if not session_exists(session_name):
         raise SessionError(f"Session not found: {project.name}")
 

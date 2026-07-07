@@ -1,13 +1,20 @@
 """Morning routine service for batch session management."""
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from kata.core.config import KATA_CONFIG_DIR
 from kata.core.models import Project
 from kata.services.registry import get_registry
-from kata.services.sessions import SessionError, launch_session, session_exists
-from kata.utils.paths import sanitize_session_name
+from kata.services.sessions import (
+    SessionError,
+    launch_session,
+    session_exists,
+    session_name_for,
+)
 
 # Routine configuration file
 ROUTINE_FILE = KATA_CONFIG_DIR / "routine.json"
@@ -61,8 +68,17 @@ def save_routine(config: RoutineConfig) -> None:
     """
     ROUTINE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(ROUTINE_FILE, "w", encoding="utf-8") as f:
-        json.dump(config.to_dict(), f, indent=2)
+    content = json.dumps(config.to_dict(), indent=2)
+    # Unique temp file + atomic replace so a crash mid-write cannot truncate
+    # the routine config.
+    fd, tmp_name = tempfile.mkstemp(dir=str(ROUTINE_FILE.parent), prefix=".routine-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_name, ROUTINE_FILE)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def add_group_to_routine(group: str) -> bool:
@@ -216,7 +232,7 @@ def _launch_project_background(project: Project) -> LaunchResult:
         LaunchResult with status
     """
     # Skip if already running
-    if session_exists(sanitize_session_name(project.name)):
+    if session_exists(session_name_for(project)):
         return LaunchResult(project=project, success=True, skipped=True)
 
     try:

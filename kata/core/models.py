@@ -37,10 +37,21 @@ class Project:
     times_opened: int = 0
     shortcut: int | None = None  # Quick launch shortcut (1-9)
     color: str | None = None  # Display color (preset name or hex)
+    # NOTE: `config` is currently write-only — set here and by the TUI rename
+    # flow, but never read to locate a config (launch uses the project's
+    # .kata.yaml via core.config). Left in place because context_menu.py still
+    # writes it; a candidate for removal in the TUI cleanup batch.
 
     def __post_init__(self) -> None:
-        """Ensure path is absolute and config is set."""
-        self.path = str(Path(self.path).resolve())
+        """Normalize the path and default the config filename.
+
+        A non-empty path is resolved to an absolute path. An empty path is
+        preserved as-is: some transient placeholders (e.g. "project not found"
+        results) carry no path, and resolving "" would silently point at the
+        current working directory.
+        """
+        if self.path:
+            self.path = str(Path(self.path).resolve())
         if not self.config:
             self.config = f"{self.name}.yaml"
 

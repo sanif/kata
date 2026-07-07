@@ -1,12 +1,18 @@
 """Registry service for managing projects."""
 
 import json
+import logging
+import os
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from kata.core.config import REGISTRY_FILE, ensure_config_dirs
 from kata.core.models import Project
 from kata.utils.paths import normalize_path
+
+logger = logging.getLogger(__name__)
 
 
 class DuplicatePathError(Exception):
@@ -27,6 +33,10 @@ class Registry:
     def __init__(self) -> None:
         """Initialize the registry."""
         self._projects: dict[str, Project] = {}
+        # Every name this instance has ever held (loaded, added, updated, or
+        # removed). Used by _save to distinguish a project we intentionally
+        # deleted from one another process added while we were live.
+        self._seen_names: set[str] = set()
         self._load()
 
     def _load(self) -> None:
@@ -35,36 +45,95 @@ class Registry:
 
         if not REGISTRY_FILE.exists():
             self._projects = {}
+            self._seen_names = set()
             return
 
         try:
             data = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
             self._projects = {p["name"]: Project.from_dict(p) for p in data.get("projects", [])}
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # Never destroy the user's data: move the corrupt file aside so the
+            # next save starts from a clean slate instead of silently wiping
+            # groups, colors, shortcuts, and history.
+            self._backup_corrupt_registry()
             self._projects = {}
+
+        self._seen_names = set(self._projects)
+
+    @staticmethod
+    def _backup_corrupt_registry() -> None:
+        """Move a corrupt registry file aside, preserving the original bytes."""
+        try:
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = REGISTRY_FILE.with_name(f"{REGISTRY_FILE.name}.corrupt-{ts}")
+            counter = 0
+            while backup.exists():
+                counter += 1
+                backup = REGISTRY_FILE.with_name(f"{REGISTRY_FILE.name}.corrupt-{ts}-{counter}")
+            os.replace(REGISTRY_FILE, backup)
+            logger.warning(
+                "registry.json was corrupt; backed it up to %s and started empty", backup
+            )
+        except OSError:
+            logger.warning("registry.json was corrupt and could not be backed up", exc_info=True)
 
     def reload(self) -> None:
         """Reload registry from disk to pick up external changes."""
         self._load()
 
     def _save(self) -> None:
-        """Save registry to disk using atomic write."""
+        """Save registry to disk atomically, merging concurrent writers.
+
+        Kata runs several processes at once (TUI, strips, daemon). To avoid a
+        stale in-memory snapshot silently clobbering another process's save, we
+        reload the on-disk state and merge it with ours: this instance is
+        authoritative for every project it knows about, and any project another
+        process added since we loaded is preserved. A project this instance
+        intentionally removed is *not* resurrected (tracked via _seen_names).
+
+        Known limitation: this is not a CRDT. If two live instances hold the
+        same project and one deletes it while the other re-saves from its stale
+        snapshot, the delete can be lost. That is an acceptable trade against
+        the far more common (and destructive) full-registry clobber.
+        """
         ensure_config_dirs()
+
+        merged: dict[str, Project] = dict(self._projects)
+        if REGISTRY_FILE.exists():
+            try:
+                disk = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
+                for entry in disk.get("projects", []):
+                    name = entry.get("name")
+                    if not name or name in merged or name in self._seen_names:
+                        continue
+                    merged[name] = Project.from_dict(entry)
+            except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError):
+                # Corrupt on-disk state: fall back to our own view rather than
+                # aborting the save (the corrupt file was already backed up on
+                # load; a fresh write here recovers it).
+                pass
 
         data: dict[str, Any] = {
             "version": "1.0",
-            "projects": [p.to_dict() for p in self._projects.values()],
+            "projects": [p.to_dict() for p in merged.values()],
         }
-
         content = json.dumps(data, indent=2, ensure_ascii=False)
-        temp_file = REGISTRY_FILE.with_suffix(".tmp")
+
+        # Unique temp file (not a fixed ".tmp" name) so concurrent writers do
+        # not race on the same path; os.replace is atomic on POSIX.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(REGISTRY_FILE.parent), prefix=".registry-", suffix=".tmp"
+        )
         try:
-            temp_file.write_text(content, encoding="utf-8")
-            temp_file.rename(REGISTRY_FILE)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_name, REGISTRY_FILE)
         except Exception:
-            if temp_file.exists():
-                temp_file.unlink()
+            Path(tmp_name).unlink(missing_ok=True)
             raise
+
+        self._projects = merged
+        self._seen_names.update(merged.keys())
 
     def add(self, project: Project) -> None:
         """Add a project to the registry.
@@ -91,6 +160,7 @@ class Registry:
             counter += 1
 
         self._projects[project.name] = project
+        self._seen_names.add(project.name)
         self._save()
 
     def remove(self, name: str) -> Project:
@@ -109,6 +179,9 @@ class Registry:
             raise ProjectNotFoundError(f"Project not found: {name}")
 
         project = self._projects.pop(name)
+        # Keep the name in _seen_names so the merge in _save does not
+        # resurrect it from a stale on-disk copy.
+        self._seen_names.add(name)
         self._save()
         return project
 
@@ -141,6 +214,7 @@ class Registry:
             raise ProjectNotFoundError(f"Project not found: {project.name}")
 
         self._projects[project.name] = project
+        self._seen_names.add(project.name)
         self._save()
 
     def list_all(self) -> list[Project]:
